@@ -2,6 +2,7 @@ plugins {
     application
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.detekt)
 }
 
 java {
@@ -14,12 +15,19 @@ application {
     mainClass.set("com.cramsan.cmpbridge.mcpserver.MainKt")
 }
 
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
+}
+
 dependencies {
     api(project(":cmp-bridge-driver"))
 
     implementation(libs.mcp.kotlin.sdk)
     implementation(libs.kotlinx.io.core)
     implementation(libs.clikt)
+
+    detektPlugins(libs.detekt.formatting)
 
     testImplementation(libs.kotlin.test.junit5)
     testImplementation(libs.junit.jupiter.api)

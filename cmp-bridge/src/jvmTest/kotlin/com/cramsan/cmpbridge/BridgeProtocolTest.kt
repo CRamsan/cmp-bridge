@@ -8,20 +8,19 @@ import kotlin.test.assertEquals
 class BridgeProtocolTest {
     private val json = Json { ignoreUnknownKeys = true }
 
-    private fun leafNode(tag: String) =
-        HierarchyNode(
-            testTag = tag,
-            role = "button",
-            text = "value",
-            contentDescription = null,
-            x = 1f,
-            y = 2f,
-            width = 3f,
-            height = 4f,
-            enabled = false,
-            actions = setOf("OnClick"),
-            children = emptyList(),
-        )
+    private fun leafNode(tag: String) = HierarchyNode(
+        testTag = tag,
+        role = "button",
+        text = "value",
+        contentDescription = null,
+        x = 1f,
+        y = 2f,
+        width = 3f,
+        height = 4f,
+        enabled = false,
+        actions = setOf("OnClick"),
+        children = emptyList(),
+    )
 
     private inline fun <reified T> roundTrip(value: T) {
         val encoded = json.encodeToString(value)

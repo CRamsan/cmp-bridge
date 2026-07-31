@@ -6,6 +6,16 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.detekt)
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
+}
+
+dependencies {
+    detektPlugins(libs.detekt.formatting)
 }
 
 kotlin {
@@ -60,4 +70,14 @@ tasks.named<Test>("jvmTest") {
     testLogging {
         events("passed", "skipped", "failed")
     }
+}
+
+// See the equivalent comment in cmp-bridge/build.gradle.kts — same cause (detekt 2.0's Gradle
+// plugin doesn't wire per-source-set KMP analysis tasks into the plain "detekt" task itself).
+tasks.named("detekt") {
+    dependsOn(
+        tasks.matching {
+            it.name.startsWith("detekt") && it.name.endsWith("SourceSet") && "Baseline" !in it.name
+        },
+    )
 }

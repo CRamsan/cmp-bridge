@@ -53,12 +53,11 @@ internal class BridgeExplorerOptions : OptionGroup(name = "Bridge connection") {
         help = "URL of the already-running wasmJs dev server (required for --platform=web)",
     )
 
-    fun connect(): BridgeDriver =
-        when (platform) {
-            "desktop" -> DesktopBridgeDriver.connect(host, port)
-            "web" -> WebBridgeDriver.connect(url ?: error("--url is required when --platform=web"))
-            else -> error("Unknown platform \"$platform\"")
-        }
+    fun connect(): BridgeDriver = when (platform) {
+        "desktop" -> DesktopBridgeDriver.connect(host, port)
+        "web" -> WebBridgeDriver.connect(url ?: error("--url is required when --platform=web"))
+        else -> error("Unknown platform \"$platform\"")
+    }
 }
 
 /** Entry point for the UI test bridge HTTP server. */

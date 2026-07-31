@@ -39,6 +39,9 @@ class WasmDevServerProcess private constructor(
          * bring up the dev server. [port] defaults to the standard Kotlin/JS webpack-dev-server
          * port; override only if an app's `webpack.config.d` pins a different one.
          */
+        // Deliberate catch-all: any readiness failure gets wrapped with the dev server's own log
+        // path attached below, rather than surfacing a bare exception with nowhere to look.
+        @Suppress("TooGenericExceptionCaught")
         fun launch(gradleModulePath: String, port: Int = DEFAULT_PORT): WasmDevServerProcess {
             val repoRoot =
                 System.getProperty("e2e.repoRoot")

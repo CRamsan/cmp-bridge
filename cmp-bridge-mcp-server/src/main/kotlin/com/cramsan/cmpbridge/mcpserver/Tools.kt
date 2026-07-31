@@ -107,33 +107,35 @@ private fun Server.registerScreenshotTool(driver: BridgeDriver) {
     }
 }
 
-private fun stringPropertiesSchema(vararg properties: Pair<String, String>): ToolSchema =
-    ToolSchema(
-        properties =
-        buildJsonObject {
-            properties.forEach { (name, description) ->
-                put(
-                    name,
-                    buildJsonObject {
-                        put("type", "string")
-                        put("description", description)
-                    },
-                )
-            }
-        },
-        required = properties.map { it.first },
-    )
+private fun stringPropertiesSchema(vararg properties: Pair<String, String>): ToolSchema = ToolSchema(
+    properties =
+    buildJsonObject {
+        properties.forEach { (name, description) ->
+            put(
+                name,
+                buildJsonObject {
+                    put("type", "string")
+                    put("description", description)
+                },
+            )
+        }
+    },
+    required = properties.map { it.first },
+)
 
 private fun JsonObject?.stringArg(name: String): String =
     this?.get(name)?.jsonPrimitive?.content ?: error("Missing \"$name\" argument")
 
-/** Converts a thrown [BridgeDriver] failure (unknown tag, timeout, ...) into an MCP tool-level error rather than crashing the session. */
-private suspend fun safeCall(block: suspend () -> CallToolResult): CallToolResult =
-    try {
-        block()
-    } catch (e: Exception) {
-        CallToolResult(
-            content = listOf(TextContent(text = e.message ?: e::class.simpleName ?: "Unknown error")),
-            isError = true,
-        )
-    }
+/**
+ * Converts a thrown [BridgeDriver] failure (unknown tag, timeout, ...) into an MCP tool-level
+ * error rather than crashing the session.
+ */
+@Suppress("TooGenericExceptionCaught") // deliberate: any failure here becomes a tool error, never crashes the session
+private suspend fun safeCall(block: suspend () -> CallToolResult): CallToolResult = try {
+    block()
+} catch (e: Exception) {
+    CallToolResult(
+        content = listOf(TextContent(text = e.message ?: e::class.simpleName ?: "Unknown error")),
+        isError = true,
+    )
+}

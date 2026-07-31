@@ -60,88 +60,82 @@ private class FakeBridgeDriver : BridgeDriver {
 
 class RoutesTest {
     @Test
-    fun `GET hierarchy returns the driver's tree`() =
-        testApplication {
-            application { bridgeHttpModule(FakeBridgeDriver()) }
-            val response = client.get("/hierarchy")
-            assertEquals(HttpStatusCode.OK, response.status)
-            assertTrue(response.bodyAsText().contains("\"width\":100.0"))
-        }
+    fun `GET hierarchy returns the driver's tree`() = testApplication {
+        application { bridgeHttpModule(FakeBridgeDriver()) }
+        val response = client.get("/hierarchy")
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(response.bodyAsText().contains("\"width\":100.0"))
+    }
 
     @Test
-    fun `POST click delegates to the driver`() =
-        testApplication {
-            val driver = FakeBridgeDriver()
-            application { bridgeHttpModule(driver) }
-            val client = createClient { install(ContentNegotiation) { json() } }
+    fun `POST click delegates to the driver`() = testApplication {
+        val driver = FakeBridgeDriver()
+        application { bridgeHttpModule(driver) }
+        val client = createClient { install(ContentNegotiation) { json() } }
 
-            val response =
-                client.post("/click") {
-                    contentType(ContentType.Application.Json)
-                    setBody("""{"tag":"my_tag"}""")
-                }
+        val response =
+            client.post("/click") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"tag":"my_tag"}""")
+            }
 
-            assertEquals(HttpStatusCode.OK, response.status)
-            assertEquals("my_tag", driver.lastClickTag)
-        }
-
-    @Test
-    fun `POST setText delegates to the driver`() =
-        testApplication {
-            val driver = FakeBridgeDriver()
-            application { bridgeHttpModule(driver) }
-            val client = createClient { install(ContentNegotiation) { json() } }
-
-            val response =
-                client.post("/setText") {
-                    contentType(ContentType.Application.Json)
-                    setBody("""{"tag":"my_tag","text":"hello"}""")
-                }
-
-            assertEquals(HttpStatusCode.OK, response.status)
-            assertEquals("my_tag" to "hello", driver.lastSetText)
-        }
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals("my_tag", driver.lastClickTag)
+    }
 
     @Test
-    fun `POST scroll delegates to the driver`() =
-        testApplication {
-            val driver = FakeBridgeDriver()
-            application { bridgeHttpModule(driver) }
-            val client = createClient { install(ContentNegotiation) { json() } }
+    fun `POST setText delegates to the driver`() = testApplication {
+        val driver = FakeBridgeDriver()
+        application { bridgeHttpModule(driver) }
+        val client = createClient { install(ContentNegotiation) { json() } }
 
-            val response =
-                client.post("/scroll") {
-                    contentType(ContentType.Application.Json)
-                    setBody("""{"anchorTag":"my_tag","deltaY":40}""")
-                }
+        val response =
+            client.post("/setText") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"tag":"my_tag","text":"hello"}""")
+            }
 
-            assertEquals(HttpStatusCode.OK, response.status)
-            assertEquals("my_tag" to 40, driver.lastScroll)
-        }
-
-    @Test
-    fun `POST click on a failing driver returns 400 with the error message`() =
-        testApplication {
-            val driver = FakeBridgeDriver().apply { shouldFailClick = true }
-            application { bridgeHttpModule(driver) }
-            val client = createClient { install(ContentNegotiation) { json() } }
-
-            val response =
-                client.post("/click") {
-                    contentType(ContentType.Application.Json)
-                    setBody("""{"tag":"missing"}""")
-                }
-
-            assertEquals(HttpStatusCode.BadRequest, response.status)
-            assertTrue(response.bodyAsText().contains("Unknown tag"))
-        }
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals("my_tag" to "hello", driver.lastSetText)
+    }
 
     @Test
-    fun `GET screenshot returns PNG bytes`() =
-        testApplication {
-            application { bridgeHttpModule(FakeBridgeDriver()) }
-            val response = client.get("/screenshot")
-            assertEquals(HttpStatusCode.OK, response.status)
-            assertEquals(0x89.toByte(), response.bodyAsBytes()[0])
-        }
+    fun `POST scroll delegates to the driver`() = testApplication {
+        val driver = FakeBridgeDriver()
+        application { bridgeHttpModule(driver) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/scroll") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"anchorTag":"my_tag","deltaY":40}""")
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals("my_tag" to 40, driver.lastScroll)
+    }
+
+    @Test
+    fun `POST click on a failing driver returns 400 with the error message`() = testApplication {
+        val driver = FakeBridgeDriver().apply { shouldFailClick = true }
+        application { bridgeHttpModule(driver) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/click") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"tag":"missing"}""")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertTrue(response.bodyAsText().contains("Unknown tag"))
+    }
+
+    @Test
+    fun `GET screenshot returns PNG bytes`() = testApplication {
+        application { bridgeHttpModule(FakeBridgeDriver()) }
+        val response = client.get("/screenshot")
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(0x89.toByte(), response.bodyAsBytes()[0])
+    }
 }

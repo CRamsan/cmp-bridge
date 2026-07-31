@@ -30,7 +30,10 @@ class DemoScenarioTest {
         // `process` for cleanup yet — close it explicitly on that path or a failed connect leaks
         // the launched app process (confirmed live for the web equivalent of this same shape).
         val driver = runCatching { DesktopBridgeDriver.connect(process.host, process.port) }
-            .getOrElse { process.close(); throw it }
+            .getOrElse {
+                process.close()
+                throw it
+            }
         ManagedBridgeDriver(process, driver).use { d ->
             assertEquals("Count: 0", d.waitForTag("counter_text").text)
 
@@ -66,7 +69,10 @@ class DemoScenarioTest {
     fun `web app is drivable through the bridge for what this Compose Multiplatform version supports`() {
         val process = WasmDevServerProcess.launch(":cmp-bridge-sample")
         val driver = runCatching { WebBridgeDriver.connect(process.url) }
-            .getOrElse { process.close(); throw it }
+            .getOrElse {
+                process.close()
+                throw it
+            }
         ManagedBridgeDriver(process, driver).use { d ->
             assertEquals("Count: 0", d.waitForTag("counter_text").text)
 

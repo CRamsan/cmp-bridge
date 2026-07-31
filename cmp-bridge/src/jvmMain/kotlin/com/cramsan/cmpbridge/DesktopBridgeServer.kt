@@ -48,6 +48,8 @@ import javax.swing.SwingUtilities
  * Speaks the typed [BridgeCommand]/[BridgeResponse] protocol (see `BridgeProtocol.kt`): one
  * JSON-encoded command per line in, one JSON-encoded response per line out.
  */
+// One cohesive protocol handler, deliberately kept as small private helpers rather than split.
+@Suppress("TooManyFunctions")
 object DesktopBridgeServer {
     const val ENABLED_PROPERTY = "cmpBridge.enabled"
     const val PORT_PROPERTY = "cmpBridge.port"
@@ -94,6 +96,7 @@ object DesktopBridgeServer {
         }
     }
 
+    @Suppress("TooGenericExceptionCaught") // see the comment on the catch site below: deliberate, not an oversight
     private suspend fun handleConnection(socket: Socket, window: Window) {
         socket.use {
             val reader = BufferedReader(InputStreamReader(it.getInputStream()))
@@ -117,37 +120,36 @@ object DesktopBridgeServer {
     }
 
     /** Dispatches a single [BridgeCommand] to its handler, producing a [BridgeResponse]. */
-    private fun handleCommand(command: BridgeCommand, window: Window): BridgeResponse =
-        when (command) {
-            is BridgeCommand.GetHierarchy -> {
-                BridgeResponse.Hierarchy(buildHierarchy(window))
-            }
+    private fun handleCommand(command: BridgeCommand, window: Window): BridgeResponse = when (command) {
+        is BridgeCommand.GetHierarchy -> {
+            BridgeResponse.Hierarchy(buildHierarchy(window))
+        }
 
-            is BridgeCommand.Click -> {
-                if (click(command.tag, window)) BridgeResponse.Ack else unknownTag(command.tag)
-            }
+        is BridgeCommand.Click -> {
+            if (click(command.tag, window)) BridgeResponse.Ack else unknownTag(command.tag)
+        }
 
-            is BridgeCommand.SetText -> {
-                if (click(command.tag, window)) {
-                    pasteText(command.text, window)
-                    BridgeResponse.Ack
-                } else {
-                    unknownTag(command.tag)
-                }
-            }
-
-            is BridgeCommand.Scroll -> {
-                if (scroll(command.anchorTag, command.deltaY, window)) {
-                    BridgeResponse.Ack
-                } else {
-                    unknownTag(command.anchorTag)
-                }
-            }
-
-            is BridgeCommand.Screenshot -> {
-                BridgeResponse.Image(captureScreenshot(window))
+        is BridgeCommand.SetText -> {
+            if (click(command.tag, window)) {
+                pasteText(command.text, window)
+                BridgeResponse.Ack
+            } else {
+                unknownTag(command.tag)
             }
         }
+
+        is BridgeCommand.Scroll -> {
+            if (scroll(command.anchorTag, command.deltaY, window)) {
+                BridgeResponse.Ack
+            } else {
+                unknownTag(command.anchorTag)
+            }
+        }
+
+        is BridgeCommand.Screenshot -> {
+            BridgeResponse.Image(captureScreenshot(window))
+        }
+    }
 
     private fun unknownTag(tag: String): BridgeResponse.Failure = BridgeResponse.Failure("Unknown tag: $tag")
 
@@ -240,17 +242,16 @@ object DesktopBridgeServer {
         return role
     }
 
-    private fun explicitRoleString(role: Role): String? =
-        when (role) {
-            Role.Button -> "button"
-            Role.Checkbox -> "checkbox"
-            Role.Switch -> "switch"
-            Role.RadioButton -> "radio"
-            Role.Tab -> "tab"
-            Role.Image -> "img"
-            Role.DropdownList -> "menu"
-            else -> null
-        }
+    private fun explicitRoleString(role: Role): String? = when (role) {
+        Role.Button -> "button"
+        Role.Checkbox -> "checkbox"
+        Role.Switch -> "switch"
+        Role.RadioButton -> "radio"
+        Role.Tab -> "tab"
+        Role.Image -> "img"
+        Role.DropdownList -> "menu"
+        else -> null
+    }
 
     private fun collectionRoleString(info: CollectionInfo): String =
         if (info.rowCount > 1 && info.columnCount > 1) "grid" else "list"

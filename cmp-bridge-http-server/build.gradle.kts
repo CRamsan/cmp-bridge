@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ktor.plugin)
+    alias(libs.plugins.detekt)
 }
 
 java {
@@ -15,6 +16,11 @@ application {
     mainClass.set("com.cramsan.cmpbridge.httpserver.MainKt")
 }
 
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
+}
+
 dependencies {
     api(project(":cmp-bridge-driver"))
 
@@ -25,6 +31,8 @@ dependencies {
     implementation(libs.ktor.server.status.pages)
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.clikt)
+
+    detektPlugins(libs.detekt.formatting)
 
     testImplementation(libs.kotlin.test.junit5)
     testImplementation(libs.junit.jupiter.api)

@@ -34,7 +34,10 @@ class DesktopAppProcess private constructor(
         private const val READY_POLL_INTERVAL_MS = 250L
         private const val DESTROY_TIMEOUT_SECONDS = 5L
 
-        /** [mainClass] is the app's own desktop launcher entry point, e.g. `"com.cramsan.edifikana.client.desktop.EdifikanaApplicationKt"`. */
+        /**
+         * [mainClass] is the app's own desktop launcher entry point, e.g.
+         * `"com.cramsan.edifikana.client.desktop.EdifikanaApplicationKt"`.
+         */
         fun launch(mainClass: String): DesktopAppProcess {
             val classpath =
                 System.getProperty("java.class.path")

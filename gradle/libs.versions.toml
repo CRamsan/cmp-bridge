@@ -13,6 +13,7 @@ clikt = "5.1.0"
 mcp-kotlin-sdk = "0.15.0"
 mockk = "1.14.11"
 playwright = "1.61.0"
+detekt = "2.0.0-alpha.5"
 
 [plugins]
 
@@ -23,6 +24,7 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 android-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "android-agp" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
 ktor-plugin = { id = "io.ktor.plugin", version.ref = "ktor-plugin" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
 
 [libraries]
 
@@ -33,6 +35,7 @@ kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.re
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 mcp-kotlin-sdk = { module = "io.modelcontextprotocol:kotlin-sdk", version.ref = "mcp-kotlin-sdk" }
 playwright = { module = "com.microsoft.playwright:playwright", version.ref = "playwright" }
+detekt-formatting = { module = "dev.detekt:detekt-rules-ktlint-wrapper", version.ref = "detekt" }
 
 junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit-jupiter" }
 junit-jupiter-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit-jupiter" }
