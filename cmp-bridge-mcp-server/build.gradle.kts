@@ -47,9 +47,7 @@ tasks.named<Jar>("jar") {
     archiveBaseName.set("cmp-bridge-mcp-server")
 }
 
-// See the equivalent comment in cmp-bridge-http-server/build.gradle.kts — same cause
-// (:cmp-bridge-driver drags Compose Desktop's dependency graph along). Covers both the archive
-// tasks (distTar/distZip) and the Sync-based installDist staging task.
+// Same duplicate-jar cause as cmp-bridge-http-server/build.gradle.kts.
 tasks.withType<AbstractCopyTask>().configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

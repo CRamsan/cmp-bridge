@@ -14,14 +14,9 @@ import java.util.Base64
 private val json = Json { ignoreUnknownKeys = true }
 
 /**
- * Drives a real desktop app instance over the UI interaction bridge's debug socket (see
- * `DesktopBridgeServer`) — connection-only, never launches anything itself, so [close] never
- * touches a process.
- *
- * For a test that wants its own disposable app instance, pair [connect] with
- * [DesktopAppProcess.launch] (optionally via [ManagedBridgeDriver] for single-call teardown).
- * Otherwise just point [connect] at a host/port that's already running (e.g. started manually
- * with `-PcmpBridge`).
+ * Drives a real desktop app instance over the UI bridge's debug socket. Connection-only — never
+ * launches anything, so [close] never touches a process. Pair [connect] with
+ * [DesktopAppProcess.launch] (optionally via [ManagedBridgeDriver]) for a disposable instance.
  */
 class DesktopBridgeDriver private constructor(private val host: String, private val port: Int) : BridgeDriver {
     private fun send(command: BridgeCommand): BridgeResponse {

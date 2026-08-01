@@ -27,16 +27,12 @@ import java.io.PrintStream
 private const val DEFAULT_DESKTOP_PORT = 8901
 
 /**
- * Serves an already-running app's UI interaction bridge over MCP (stdio transport) — the app is
- * expected to already be running, same as `cmp-bridge-http-server`; this process never
- * launches one itself. Registers one MCP tool per [BridgeDriver] operation.
+ * Serves an already-running app's UI bridge over MCP (stdio transport) — never launches an app
+ * itself. Registers one MCP tool per [BridgeDriver] operation.
  *
- * **Nothing may write to stdout except the MCP JSON-RPC stream itself** — confirmed live that the
- * MCP SDK's own `kotlin-logging` dependency prints an initialization banner straight to stdout
- * ("kotlin-logging: initializing...") before any protocol traffic even starts, which would
- * corrupt every MCP client's parsing. [main] captures the real stdout stream first and globally
- * redirects `System.out` to stderr immediately after, so that banner (or any other stray
- * `println`, present or future) lands somewhere harmless instead of on the wire.
+ * **Nothing may write to stdout except the MCP JSON-RPC stream itself.** [main] captures real
+ * stdout first and redirects `System.out` to stderr immediately after, so any stray output lands
+ * somewhere harmless instead of on the wire.
  */
 private class BridgeMcpServerCommand(private val realStdout: PrintStream) :
     CliktCommand(
@@ -63,11 +59,8 @@ private class BridgeMcpServerCommand(private val realStdout: PrintStream) :
 }
 
 /**
- * Shared connection args, identical across the HTTP and MCP servers: which already-running app
- * to attach to. Never launches anything itself — see [DesktopBridgeDriver.connect]/
- * [WebBridgeDriver.connect]. Duplicated verbatim in `cmp-bridge-http-server` rather than
- * pulled into a third shared module — a deliberate simplicity choice, same as not having a
- * separate "explorer service" abstraction (see the driving plan's rationale).
+ * Connection args for attaching to an already-running app — never launches anything itself.
+ * Duplicated verbatim in `cmp-bridge-http-server` rather than shared through a third module.
  */
 internal class BridgeExplorerOptions : OptionGroup(name = "Bridge connection") {
     val platform: String by option("--platform", help = "\"desktop\" or \"web\"").choice("desktop", "web").required()

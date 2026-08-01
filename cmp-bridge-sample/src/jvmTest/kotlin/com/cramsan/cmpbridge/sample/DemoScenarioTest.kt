@@ -13,21 +13,17 @@ import kotlin.test.assertTrue
 
 /**
  * Drives the [App] sample screen through [BridgeDriver] on both platforms — desktop over the
- * socket bridge, web over Compose Multiplatform's own accessibility DOM — as the concrete proof
- * that `BridgeDriver` is one contract with two backends. No equivalent test existed before this
- * module: the original E2E suites this library was extracted alongside depended on app fixtures
- * that don't exist standalone. This module is that fixture, rebuilt from scratch.
+ * socket bridge, web over Compose Multiplatform's accessibility DOM.
  *
  * Desktop exercises all five `BridgeDriver` operations end to end. Web exercises three of five —
- * see the web test's own doc comment for the two it deliberately doesn't, and why.
+ * see the web test's own comment for why.
  */
 class DemoScenarioTest {
     @Test
     fun `desktop app is fully drivable through the bridge`() {
         val process = DesktopAppProcess.launch("com.cramsan.cmpbridge.sample.MainKt")
         // connect() is evaluated as a constructor argument, so if it throws, nothing has wrapped
-        // `process` for cleanup yet — close it explicitly on that path or a failed connect leaks
-        // the launched app process (confirmed live for the web equivalent of this same shape).
+        // `process` for cleanup yet — close it explicitly or a failed connect leaks the process.
         val driver = runCatching { DesktopBridgeDriver.connect(process.host, process.port) }
             .getOrElse {
                 process.close()
@@ -36,10 +32,8 @@ class DemoScenarioTest {
         ManagedBridgeDriver(process, driver).use { d ->
             assertEquals("Count: 0", d.waitForTag("counter_text").text)
 
-            // A freshly-launched window's very first click can silently miss (confirmed live: the
-            // bridge's socket accepts connections slightly before the window is actually
-            // input-ready, the same class of settling gap BridgeDriver.getBounds() guards against
-            // for transient degenerate bounds) — so retry the click itself, not just the read.
+            // A freshly-launched window's very first click can silently miss — the bridge socket
+            // accepts connections slightly before the window is input-ready. Retry the click.
             for (expected in 1..3) {
                 d.clickUntilText("increment_button", "counter_text", "Count: $expected")
             }
@@ -79,22 +73,12 @@ class DemoScenarioTest {
                 d.clickUntilText("increment_button", "counter_text", "Count: $expected")
             }
 
-            // NOT exercised on web, both confirmed live against Compose Multiplatform 1.10.3's
-            // wasmJs target, neither fixable from this app:
+            // Not exercised on web: click()/setText() on "name_field", which permanently reports
+            // zero bounds in the accessibility DOM (its text still reads correctly via
+            // getHierarchy()), and scroll() — see WebBridgeDriver.scroll()'s doc comment.
             //
-            // 1. click()/setText() on "name_field": a real text-input element (tried both
-            //    material3 TextField and the simpler BasicTextField — same result either way)
-            //    permanently reports (0,0,0,0) bounds in the accessibility DOM, and so does
-            //    whatever Column sibling immediately follows it. Stable across 12+ seconds of
-            //    polling, so this is not the transient settling gap BridgeDriver.getBounds() already
-            //    guards against — a getBounds()-based click can never locate it. getHierarchy()
-            //    still reports its correct *text* (confirmed live), just never a usable bounding box.
-            // 2. scroll(): known-unverified in this sandbox's headless Chromium fallback build —
-            //    see WebBridgeDriver.scroll()'s own doc comment.
-            //
-            // What *is* verified below: getHierarchy() reflects the live DOM even for a
-            // zero-bounds node (reading "greeting_text" directly, bypassing the bounds filter),
-            // click() works, and screenshot() produces a real PNG of the current frame.
+            // What *is* verified: getHierarchy() still reflects a zero-bounds node's live text,
+            // click() works, and screenshot() produces a real PNG.
             val greeting = d.getHierarchy().find("greeting_text")
             assertEquals("Hello, stranger!", greeting?.text)
 

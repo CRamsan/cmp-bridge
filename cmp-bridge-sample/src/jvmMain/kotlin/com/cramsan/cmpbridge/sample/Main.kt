@@ -6,12 +6,8 @@ import androidx.compose.ui.window.application
 import com.cramsan.cmpbridge.DesktopBridgeServer
 
 /**
- * Desktop entry point. `window` (from [androidx.compose.ui.window.WindowScope]) is the real
- * `ComposeWindow` [DesktopBridgeServer] reads its semantics tree from and posts synthetic AWT
- * input events onto — arming the bridge here is the only cmp-bridge-specific code this app needs
- * (see `README.md`'s "Using it in your app"). It's a no-op unless launched with
- * `-DcmpBridge.enabled=true`, which is exactly what [com.cramsan.cmpbridge.driver.DesktopAppProcess]
- * does for a test.
+ * Desktop entry point. Arms [DesktopBridgeServer] against the app's real `ComposeWindow` — a
+ * no-op unless launched with `-DcmpBridge.enabled=true`.
  */
 fun main() = application {
     Window(onCloseRequest = ::exitApplication, title = "cmp-bridge sample") {

@@ -6,14 +6,9 @@ import java.net.Socket
 import java.util.concurrent.TimeUnit
 
 /**
- * Owns a desktop app subprocess launched with the UI interaction bridge armed (see
- * `DesktopBridgeServer`) — nothing more. Reuses this test JVM's own classpath
- * (`java.class.path`) to launch the child process, and an isolated `user.home` so it never reads
- * or writes whatever real session state is persisted on the machine actually running these
- * tests.
- *
- * Pair with [DesktopBridgeDriver.connect] to actually drive the app it starts — directly, or
- * through [ManagedBridgeDriver] for single-call teardown.
+ * Launches a desktop app subprocess with the UI bridge armed, using an isolated `user.home` so it
+ * doesn't touch real session state on the host machine. Pair with [DesktopBridgeDriver.connect] to
+ * drive it, or [ManagedBridgeDriver] for single-call teardown.
  */
 class DesktopAppProcess private constructor(
     private val process: Process,

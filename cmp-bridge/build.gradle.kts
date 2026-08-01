@@ -68,11 +68,8 @@ tasks.named<Test>("jvmTest") {
     }
 }
 
-// On a Kotlin Multiplatform module, detekt 2.0's Gradle plugin registers one analysis task per
-// source set/compilation (detektJvmMainSourceSet, detektWasmJsMainSourceSet, ...) instead of
-// wiring them into the plain "detekt" task the way it does for a single-target module — that
-// umbrella task reports NO-SOURCE and `check`/`build` only depend on it, so real source sets get
-// silently skipped unless it's told about them explicitly here.
+// detekt 2.0's Gradle plugin registers one analysis task per KMP source set instead of wiring
+// them into the plain "detekt" task, which otherwise reports NO-SOURCE and skips them.
 tasks.named("detekt") {
     dependsOn(
         tasks.matching {

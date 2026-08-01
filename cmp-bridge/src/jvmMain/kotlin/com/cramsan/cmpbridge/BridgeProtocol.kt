@@ -3,17 +3,8 @@ package com.cramsan.cmpbridge
 import kotlinx.serialization.Serializable
 
 /**
- * Typed wire protocol spoken between [DesktopBridgeServer] and an external driver
- * (`DesktopBridgeDriver`) over the debug socket, one JSON-encoded [BridgeCommand] per line in, one
- * JSON-encoded [BridgeResponse] per line out. A sealed hierarchy (rather than hand-parsed command
- * strings) so the command set is exhaustively checked at compile time on both ends.
- *
- * Scoped to the desktop transport only: the web transport reads the app's real accessibility DOM
- * directly via Playwright and never round-trips through a wire protocol at all.
- *
- * Deliberately small: [GetHierarchy] is the only read primitive. Bounds/wait-for-tag lookups are
- * pure client-side derivations of a fetched [HierarchyNode] (see `BridgeDriver`'s default methods),
- * not separate wire commands.
+ * Wire protocol between [DesktopBridgeServer] and `DesktopBridgeDriver`: one JSON-encoded
+ * [BridgeCommand] per line in, one JSON-encoded [BridgeResponse] per line out.
  */
 @Serializable
 sealed interface BridgeCommand {

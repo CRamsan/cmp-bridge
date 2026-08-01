@@ -24,9 +24,8 @@ detekt {
 dependencies {
     api(project(":cmp-bridge-driver"))
 
-    // No trailing ":_" on these: their version comes from the io.ktor.plugin Gradle plugin's own
-    // BOM-style alignment (applied above), not from an explicit version anywhere — matching how
-    // the version catalog declared them with no version.ref either. Don't add a placeholder here.
+    // No trailing ":_" — Ktor libraries are version-aligned by the io.ktor.plugin Gradle plugin
+    // itself; don't add a placeholder here.
     implementation("io.ktor:ktor-server-core-jvm")
     implementation("io.ktor:ktor-server-netty-jvm")
     implementation("io.ktor:ktor-server-content-negotiation")
@@ -63,11 +62,8 @@ ktor {
     }
 }
 
-// Pulling in :cmp-bridge-driver drags Compose Desktop's own dependency graph along (it depends on
-// :cmp-bridge, a Compose Multiplatform module), which has a couple of jars resolving to the same
-// file name via different coordinates — harmless for the fat jar we actually ship (buildFatJar),
-// but the `application` plugin's distTar/distZip tasks refuse to proceed without an explicit
-// duplicates policy.
+// :cmp-bridge-driver pulls in Compose Desktop, which resolves a couple of jars to the same file
+// name — harmless for the fat jar, but distTar/distZip need an explicit duplicates policy.
 tasks.withType<AbstractCopyTask>().configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

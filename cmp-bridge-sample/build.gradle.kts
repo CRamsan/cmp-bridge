@@ -31,9 +31,8 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            // Direct coordinates, not compose.runtime/.foundation/.material3/.ui: those accessors
-            // are deprecated in compose-multiplatform 1.10.3. material3 tracks its own version,
-            // independent of the rest of Compose Multiplatform.
+            // Direct coordinates, not compose.runtime/.foundation/.material3/.ui — those accessors
+            // are deprecated in this Compose Multiplatform version.
             implementation("org.jetbrains.compose.runtime:runtime:_")
             implementation("org.jetbrains.compose.foundation:foundation:_")
             implementation("org.jetbrains.compose.material3:material3:_")
@@ -65,16 +64,14 @@ compose.desktop {
 
 tasks.named<Test>("jvmTest") {
     useJUnitPlatform()
-    // WasmDevServerProcess.launch shells out to this repo's own gradlew — it needs to know where
-    // that is, since the test JVM's working directory isn't guaranteed to be the repo root.
+    // WasmDevServerProcess.launch shells out to this repo's own gradlew and needs its location.
     systemProperty("e2e.repoRoot", rootProject.projectDir.absolutePath)
     testLogging {
         events("passed", "skipped", "failed")
     }
 }
 
-// See the equivalent comment in cmp-bridge/build.gradle.kts — same cause (detekt 2.0's Gradle
-// plugin doesn't wire per-source-set KMP analysis tasks into the plain "detekt" task itself).
+// See the equivalent comment in cmp-bridge/build.gradle.kts.
 tasks.named("detekt") {
     dependsOn(
         tasks.matching {

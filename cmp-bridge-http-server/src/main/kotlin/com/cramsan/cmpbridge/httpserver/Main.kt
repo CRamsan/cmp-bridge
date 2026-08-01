@@ -38,11 +38,8 @@ private class BridgeHttpServerCommand : CliktCommand(name = "cmp-bridge-http-ser
 }
 
 /**
- * Shared connection args, identical across the HTTP and MCP servers: which already-running app
- * to attach to. Never launches anything itself — see [DesktopBridgeDriver.connect]/
- * [WebBridgeDriver.connect]. Duplicated verbatim in `cmp-bridge-mcp-server` rather than
- * pulled into a third shared module — a deliberate simplicity choice, same as not having a
- * separate "explorer service" abstraction (see the driving plan's rationale).
+ * Connection args for attaching to an already-running app — never launches anything itself.
+ * Duplicated verbatim in `cmp-bridge-mcp-server` rather than shared through a third module.
  */
 internal class BridgeExplorerOptions : OptionGroup(name = "Bridge connection") {
     val platform: String by option("--platform", help = "\"desktop\" or \"web\"").choice("desktop", "web").required()

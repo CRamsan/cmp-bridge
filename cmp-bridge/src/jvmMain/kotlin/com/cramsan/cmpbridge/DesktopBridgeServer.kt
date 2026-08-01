@@ -36,17 +36,12 @@ import javax.imageio.ImageIO
 import javax.swing.SwingUtilities
 
 /**
- * Debug-only local bridge server for JVM desktop, driving the app the same way an external tool
- * would: it never touches Compose internals for input, only the app's real semantics tree
- * (`ComposeWindow.semanticsOwners`) for reads plus synthetic AWT input events posted directly onto
- * the app's own event queue, so interactions go through the app's actual input pipeline
- * (Compose's real pointer/key event processing) without depending on OS-level input synthesis
- * (`java.awt.Robot`/XTEST), which isn't reliably supported on every X server (e.g. hangs outright
- * in some sandboxed/virtual displays).
+ * Debug-only local bridge server for JVM desktop. Drives the app via its real semantics tree
+ * (`ComposeWindow.semanticsOwners`) for reads and synthetic AWT input events posted onto the app's
+ * own event queue — never `java.awt.Robot`. Never started unless [ENABLED_PROPERTY] is set.
  *
- * Never started unless [ENABLED_PROPERTY] is set — this must never run in a release build.
- * Speaks the typed [BridgeCommand]/[BridgeResponse] protocol (see `BridgeProtocol.kt`): one
- * JSON-encoded command per line in, one JSON-encoded response per line out.
+ * Speaks the [BridgeCommand]/[BridgeResponse] protocol: one JSON-encoded command per line in, one
+ * JSON-encoded response per line out.
  */
 // One cohesive protocol handler, deliberately kept as small private helpers rather than split.
 @Suppress("TooManyFunctions")
@@ -56,17 +51,13 @@ object DesktopBridgeServer {
     private const val DEFAULT_PORT = 8901
     private val protocolJson = Json { ignoreUnknownKeys = true }
 
-    // Each synthetic AWT event in a gesture needs a strictly increasing timestamp (real input
-    // never produces two events at the exact same millisecond), so every step in click()/
-    // pasteText() below claims the next offset from `now`.
+    // Each synthetic AWT event in a gesture needs a strictly increasing timestamp.
     private const val RELEASE_OFFSET_MS = 3L
 
-    // AWT's wheel model is click-based, not pixel-based; 3 units per "click" matches the
-    // platform's own typical default (see MouseWheelEvent.getScrollAmount() docs).
+    // AWT's wheel model is click-based, not pixel-based; matches the platform's typical default.
     private const val WHEEL_SCROLL_AMOUNT = 3
 
-    // Representative subset of SemanticsActions surfaced on HierarchyNode.actions — not
-    // exhaustive, but covers the actions a scenario/agent is actually likely to act on.
+    // Subset of SemanticsActions surfaced on HierarchyNode.actions.
     private val ACTION_KEYS: List<Pair<String, SemanticsPropertyKey<*>>> =
         listOf(
             "OnClick" to SemanticsActions.OnClick,
@@ -103,9 +94,7 @@ object DesktopBridgeServer {
             val writer = PrintWriter(it.getOutputStream(), true)
             while (true) {
                 val line = reader.readLine() ?: break
-                // Both decoding and command execution (e.g. a screen-capture call failing) must
-                // never crash this connection's loop silently — the driver is always owed a
-                // response line, even if it's a Failure.
+                // A command that fails to decode or execute still owes the driver a response line.
                 val response =
                     try {
                         handleCommand(protocolJson.decodeFromString<BridgeCommand>(line), window)
@@ -153,10 +142,7 @@ object DesktopBridgeServer {
 
     private fun unknownTag(tag: String): BridgeResponse.Failure = BridgeResponse.Failure("Unknown tag: $tag")
 
-    /**
-     * Builds a fresh [HierarchyNode] tree from the app's real semantics tree — queried live on
-     * every call, never cached, so there's no "last known state" to go stale.
-     */
+    /** Builds a fresh [HierarchyNode] tree from the app's semantics tree — queried live, never cached. */
     @OptIn(ExperimentalComposeUiApi::class)
     private fun buildHierarchy(window: Window): HierarchyNode {
         val composeWindow =
@@ -195,9 +181,7 @@ object DesktopBridgeServer {
     private fun SemanticsNode.toHierarchyNode(): HierarchyNode {
         val bounds = boundsInWindow
         val cfg = config
-        // A field marked `password()` never surfaces its real content through this bridge, even
-        // in a debug build — `PasswordVisualTransformation` only masks the drawn glyphs, not what
-        // Compose's semantics tree itself reports.
+        // password() fields never surface real text/contentDescription through this bridge.
         val isPassword = cfg.contains(SemanticsProperties.Password)
         return HierarchyNode(
             testTag = cfg.valueOrNull(SemanticsProperties.TestTag),
@@ -225,11 +209,9 @@ object DesktopBridgeServer {
         if (contains(key)) get(key) else null
 
     /**
-     * Mirrors Compose Web's own `ComposeWebSemanticsListener.getRoleId()` mapping exactly
-     * (including its later-check-wins ordering, and the same acknowledged imprecision: an
-     * element with both an explicit [SemanticsProperties.Role] and [SemanticsActions.OnClick] —
-     * e.g. a checkbox, which normally has both — gets normalized to `"button"`) so scenario code
-     * sees the same role vocabulary on both platforms instead of two independently-drifting ones.
+     * Normalizes to the same role vocabulary as the web accessibility DOM, including its
+     * ambiguity: an element with both an explicit [SemanticsProperties.Role] and
+     * [SemanticsActions.OnClick] normalizes to `"button"`.
      */
     private fun SemanticsConfiguration.roleString(): String? {
         var role = valueOrNull(SemanticsProperties.Role)?.let { explicitRoleString(it) }
@@ -257,15 +239,10 @@ object DesktopBridgeServer {
         if (info.rowCount > 1 && info.columnCount > 1) "grid" else "list"
 
     /**
-     * The component that actually receives input inside a Compose Desktop [Window]. This is
-     * several layers below the window itself (`JRootPane` > `JLayeredPane` > ... >
-     * `ComposeWindowPanel` > ... > Skiko's `SkiaLayer`'s content component), and that exact
-     * nesting is an internal implementation detail that could shift between Compose Multiplatform
-     * versions. Rather than hardcode the path, walk the component tree depth-first for whichever
-     * descendant actually has a mouse listener registered on it — that's the real input target
-     * (confirmed by inspecting Compose Desktop's own `ComposeSceneMediator.subscribeToInputEvents`)
-     * regardless of how many wrapper panels sit above it. Falls back to the window itself if
-     * nothing qualifies, so this degrades rather than crashing.
+     * The component that actually receives input inside a Compose Desktop [Window] — found by
+     * walking the component tree for whichever descendant has a mouse listener registered, rather
+     * than hardcoding its (internal, version-dependent) nesting. Falls back to the window itself
+     * if nothing qualifies.
      */
     private fun inputTargetComponent(window: Window): Component {
         fun findInteractive(component: Component): Component? {
@@ -287,20 +264,16 @@ object DesktopBridgeServer {
         val y = (node.y + node.height / 2).toInt()
         val queue = Toolkit.getDefaultToolkit().systemEventQueue
         val now = System.currentTimeMillis()
-        // A real click is always preceded by pointer movement; Compose's pointer-input pipeline
-        // tracks hover/position state and doesn't process a press cleanly without it.
+        // A press without preceding pointer movement isn't processed cleanly by Compose's
+        // pointer-input pipeline.
         queue.postEvent(
             MouseEvent(target, MouseEvent.MOUSE_ENTERED, now, 0, x, y, 0, false),
         )
         queue.postEvent(
             MouseEvent(target, MouseEvent.MOUSE_MOVED, now + 1, 0, x, y, 0, false),
         )
-        // modifiersEx must reflect button state *at the time of the event*, not just "which
-        // button is involved" (that's what the trailing `button` param is for): the button is
-        // down during PRESSED, but no longer down by RELEASED/CLICKED. Compose Desktop's
-        // internal OnlyValidPrimaryMouseButtonFilter tracks this across events and silently drops
-        // the gesture if told the button is still down after it's released — confirmed by
-        // decompiling ComposeSceneMediator/AwtEventFilter and reproducing the fix live.
+        // modifiersEx must reflect button state at the time of each event (down during PRESSED,
+        // up by RELEASED/CLICKED) or Compose Desktop silently drops the gesture.
         queue.postEvent(
             MouseEvent(
                 target,
@@ -340,8 +313,7 @@ object DesktopBridgeServer {
                 MouseEvent.BUTTON1,
             ),
         )
-        // The event queue processes events strictly in order, so an empty invokeAndWait here
-        // only returns once every event posted above has actually been dispatched.
+        // Blocks until every event posted above has been dispatched.
         SwingUtilities.invokeAndWait {}
         return true
     }
@@ -357,7 +329,7 @@ object DesktopBridgeServer {
         val y = (node.y + node.height / 2).toInt()
         val queue = Toolkit.getDefaultToolkit().systemEventQueue
         val now = System.currentTimeMillis()
-        // Same lesson as click(): the pointer needs to be over the target before the gesture.
+        // Pointer must be over the target before the wheel event, same as click().
         queue.postEvent(
             MouseEvent(target, MouseEvent.MOUSE_ENTERED, now, 0, x, y, 0, false),
         )
@@ -384,12 +356,9 @@ object DesktopBridgeServer {
     }
 
     /**
-     * Captures the app window's current frame as a base64-encoded PNG by painting the window's
-     * own component tree into an off-screen image — not [Robot.createScreenCapture], which this
-     * sandbox's display denies outright (`"Screen Capture in the selected area was not
-     * allowed"`), confirmed live. [Component.paint] re-invokes Compose Desktop's real Skia
-     * rendering synchronously into the supplied [java.awt.Graphics], the same as any other AWT
-     * repaint, so this reflects the actual current frame rather than a stale buffer.
+     * Captures the window's current frame as a base64-encoded PNG via [Component.paint] into an
+     * off-screen image — not `Robot.createScreenCapture`, which fails in headless/sandboxed
+     * environments.
      */
     private fun captureScreenshot(window: Window): String {
         val image = BufferedImage(window.width, window.height, BufferedImage.TYPE_INT_ARGB)
@@ -402,12 +371,9 @@ object DesktopBridgeServer {
     }
 
     /**
-     * Pastes [text] via the system clipboard rather than simulating each keystroke, since
-     * per-character key simulation is unreliable across keyboard layouts/locales for arbitrary
-     * text (unicode, symbols) — confirmed live that raw `KEY_TYPED` events don't insert text at
-     * all (Compose Desktop's normal typing path goes through the platform input-method framework,
-     * not bare key events), whereas a real Ctrl+V shortcut does. Assumes the target field is
-     * already focused by a preceding [click].
+     * Pastes [text] via the system clipboard rather than simulating keystrokes — per-character
+     * key simulation doesn't reliably insert arbitrary text (unicode, symbols) across keyboard
+     * layouts/locales. Assumes the target field is already focused by a preceding [click].
      */
     private fun pasteText(text: String, window: Window) {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)

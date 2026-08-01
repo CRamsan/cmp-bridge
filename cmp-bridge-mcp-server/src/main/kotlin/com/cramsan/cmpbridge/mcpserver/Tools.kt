@@ -130,7 +130,7 @@ private fun JsonObject?.stringArg(name: String): String =
  * Converts a thrown [BridgeDriver] failure (unknown tag, timeout, ...) into an MCP tool-level
  * error rather than crashing the session.
  */
-@Suppress("TooGenericExceptionCaught") // deliberate: any failure here becomes a tool error, never crashes the session
+@Suppress("TooGenericExceptionCaught")
 private suspend fun safeCall(block: suspend () -> CallToolResult): CallToolResult = try {
     block()
 } catch (e: Exception) {
