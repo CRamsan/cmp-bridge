@@ -34,6 +34,7 @@ breakdown, including where the two platforms' capabilities differ.
 |---|---|
 | `cmp-bridge` | Add to your app. Defines the wire protocol and runs the in-process bridge server on desktop. |
 | `cmp-bridge-driver` | Add to your test source set. `BridgeDriver` plus its desktop/web implementations and helpers to launch a disposable app/dev-server instance. |
+| `cmp-bridge-http-client` | Add to your test source set instead of `cmp-bridge-driver`'s own drivers when you only have network access to a running `cmp-bridge-http-server` — implements `BridgeDriver` over its REST API. |
 | `cmp-bridge-http-server` | Standalone process. Exposes a running app's bridge over a local REST API. |
 | `cmp-bridge-mcp-server` | Standalone process. Exposes a running app's bridge over MCP (stdio), for LLM agents. |
 | `cmp-bridge-sample` | A minimal demo app plus an end-to-end test (`DemoScenarioTest`) driving it on both platforms — the best reference for wiring the bridge into your own app. |
@@ -175,6 +176,19 @@ ManagedBridgeDriver(process, driver).use { d ->
 `WasmDevServerProcess` + `WebBridgeDriver.connect(url)` is the equivalent pair for a
 wasmJs app. `cmp-bridge-sample`'s `DemoScenarioTest` is a complete, working example of
 both.
+
+**Driving it from elsewhere over HTTP.** If your test code doesn't have direct access
+to the app or dev server — only network access to a `cmp-bridge-http-server` instance
+fronting it — use `cmp-bridge-http-client`'s `HttpBridgeDriver` instead. It implements
+the same `BridgeDriver` interface, so the rest of your test code doesn't change:
+
+```kotlin
+val driver = HttpBridgeDriver.connect("http://127.0.0.1:8090")
+driver.use { d ->
+    d.click("submit_button")
+    assertEquals("Done", d.waitForTag("status_text").text)
+}
+```
 
 This repo doesn't currently publish artifacts to a package registry; consume it as a
 Gradle composite build (`includeBuild("path/to/cmp-bridge")` in `settings.gradle.kts`)

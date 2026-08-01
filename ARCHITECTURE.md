@@ -17,11 +17,13 @@ interface.
 graph TD
     bridge["cmp-bridge<br/>(embedded in the app under test)"]
     driver["cmp-bridge-driver<br/>(BridgeDriver + platform implementations)"]
+    httpClient["cmp-bridge-http-client<br/>(BridgeDriver over HTTP)"]
     http["cmp-bridge-http-server<br/>(REST CLI)"]
     mcp["cmp-bridge-mcp-server<br/>(MCP CLI)"]
     sample["cmp-bridge-sample<br/>(demo app + E2E fixture)"]
 
     driver -->|api, for HierarchyNode/protocol types| bridge
+    httpClient -->|api, for BridgeDriver| driver
     http -->|api| driver
     mcp -->|api| driver
     sample -.jvmMain depends on.-> bridge
@@ -32,6 +34,7 @@ graph TD
 |---|---|---|---|
 | `cmp-bridge` | KMP library (android, jvm, wasmJs); bridge server is jvm-only | — | Ships inside the app under test. Defines the wire protocol and `HierarchyNode`, and on desktop runs the in-process bridge server. |
 | `cmp-bridge-driver` | JVM library | `cmp-bridge` | Consumed by an app's own test code. `BridgeDriver` interface plus its desktop and web implementations, plus helpers to launch/tear down the app or dev server under test. |
+| `cmp-bridge-http-client` | JVM library | `cmp-bridge-driver` | Consumed by test code that wants to drive an app through a running `cmp-bridge-http-server` instead of connecting to the app directly. Implements `BridgeDriver` over that server's REST API. |
 | `cmp-bridge-http-server` | JVM application | `cmp-bridge-driver` | Standalone process exposing a `BridgeDriver` over a local REST API, for non-JVM tooling. |
 | `cmp-bridge-mcp-server` | JVM application | `cmp-bridge-driver` | Standalone process exposing a `BridgeDriver` over MCP (stdio), for LLM agents. |
 | `cmp-bridge-sample` | KMP application (jvm, wasmJs) | `cmp-bridge`, `cmp-bridge-driver` (test-only) | Minimal demo screen used as the real end-to-end fixture: the same UI is driven on both platforms in `DemoScenarioTest`. |
@@ -111,9 +114,12 @@ from ARIA role, and a couple of known gaps are called out where they bite (see
 `BridgeDriver` (`cmp-bridge-driver/BridgeDriver.kt`) is the seam everything above the
 transport layer is written against: `getHierarchy`, `getBounds`/`waitForTag` (default
 methods built on `getHierarchy`), `click`, `setText`, `scroll`, `screenshot`, and
-`close` (`AutoCloseable`). `DesktopBridgeDriver` and `WebBridgeDriver` are its only two
-implementations. Everything downstream — the HTTP server, the MCP server, an app's own
-test code — is written against this interface, not against either platform's transport.
+`close` (`AutoCloseable`). `DesktopBridgeDriver` and `WebBridgeDriver` are its two
+implementations that talk to an app directly; `cmp-bridge-http-client`'s
+`HttpBridgeDriver` is a third that talks to a `cmp-bridge-http-server` instance
+instead (see below) — same interface, so test code doesn't change based on which one
+it's given. Everything downstream — the HTTP server, the MCP server, an app's own test
+code — is written against this interface, not against either platform's transport.
 
 ### Connecting vs. launching
 
@@ -158,6 +164,26 @@ already up).
   rest of the process — any stray print from a dependency lands somewhere harmless
   instead of corrupting the wire protocol. Driver failures are caught per-tool-call
   (`safeCall`) and turned into an MCP tool-level error rather than crashing the session.
+
+## `cmp-bridge-http-client`: a `BridgeDriver` over HTTP
+
+`cmp-bridge-http-client`'s `HttpBridgeDriver` is a third `BridgeDriver`
+implementation, alongside `DesktopBridgeDriver` and `WebBridgeDriver` — but instead of
+talking to an app directly, it talks to a `cmp-bridge-http-server` instance that's
+already standing in front of one. Every call is a `POST {baseUrl}/bridge` using the
+exact request envelope `Routes.kt` expects (`{"operation": "...", "payload": {...}}`);
+`HttpBridgeDriver` mirrors the server's private request/payload data classes by hand
+rather than sharing them through a third module, the same duplication trade-off
+`BridgeExplorerOptions` already makes between `cmp-bridge-http-server` and
+`cmp-bridge-mcp-server`. A non-200 response is decoded for its `{"error": "..."}` body
+and re-thrown as a plain exception, matching every other driver's failure contract.
+
+This exists so a caller that only has network access to a `cmp-bridge-http-server`
+(rather than a socket to the desktop app or a Playwright-drivable browser) can still
+write ordinary `BridgeDriver` test code — `HttpBridgeDriver.connect(baseUrl)` is a
+drop-in for `DesktopBridgeDriver.connect`/`WebBridgeDriver.connect`. Like both of
+those, it's connection-only: `connect` never launches the http-server process, and
+`close()` only tears down its own `HttpClient`.
 
 ## `cmp-bridge-sample`: the real fixture
 
