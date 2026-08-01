@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.jvm")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("dev.detekt")
+    id("com.gradleup.shadow")
 }
 
 java {
@@ -45,6 +46,14 @@ tasks.named<Test>("test") {
 
 tasks.named<Jar>("jar") {
     archiveBaseName.set("cmp-bridge-mcp-server")
+}
+
+// com.gradleup.shadow auto-wires Main-Class from the application {} block above onto shadowJar's
+// merged manifest — same mechanism io.ktor.plugin's fatJar {} in cmp-bridge-http-server relies on
+// (that one's a Ktor-flavored wrapper around the same Shadow plugin). archiveFileName is a plain
+// Jar-task property (ShadowJar extends Jar), so no Shadow-specific import is needed here.
+tasks.named<Jar>("shadowJar") {
+    archiveFileName.set("cmp-bridge-mcp-server-all.jar")
 }
 
 // Same duplicate-jar cause as cmp-bridge-http-server/build.gradle.kts.

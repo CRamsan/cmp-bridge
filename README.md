@@ -28,6 +28,51 @@ operations (`getHierarchy`, `click`, `setText`, `scroll`, `screenshot`) and one 
 tree shape, `HierarchyNode`. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full
 breakdown, including where the two platforms' capabilities differ.
 
+The blue boxes below are cmp-bridge's own modules; everything else — your app, your
+test code, curl, an LLM agent — is external to this project and just talks to them:
+
+```mermaid
+graph TB
+    subgraph desktopApp["Your app under test — desktop process"]
+        ComposeWindow["ComposeWindow<br/>(real semantics tree)"]
+        BridgeServer["DesktopBridgeServer<br/>cmp-bridge, embedded, opt-in"]
+        ComposeWindow --- BridgeServer
+    end
+
+    subgraph webApp["Your app under test — browser tab"]
+        A11yDom["Compose Web's built-in<br/>accessibility DOM"]
+    end
+
+    subgraph drivers["cmp-bridge-driver"]
+        DesktopDriver["DesktopBridgeDriver"]
+        WebDriver["WebBridgeDriver<br/>via Playwright"]
+    end
+
+    BridgeServer <-->|"JSON commands<br/>over TCP socket"| DesktopDriver
+    WebDriver -->|"real input events<br/>(Playwright)"| A11yDom
+    A11yDom -->|"live tree"| WebDriver
+
+    DesktopDriver -. implements .-> BridgeDriverIface(("BridgeDriver<br/>interface"))
+    WebDriver -. implements .-> BridgeDriverIface
+
+    BridgeDriverIface --> YourTest["Your JVM test code"]
+    BridgeDriverIface --> HttpServer["cmp-bridge-http-server<br/>REST · POST /bridge"]
+    BridgeDriverIface --> McpServer["cmp-bridge-mcp-server<br/>MCP over stdio"]
+
+    subgraph external["External clients"]
+        Curl["curl / any HTTP client"]
+        HttpClientDriver["cmp-bridge-http-client<br/>HttpBridgeDriver"]
+        LlmAgent["LLM agent<br/>e.g. Claude Desktop"]
+    end
+
+    Curl --> HttpServer
+    HttpClientDriver --> HttpServer
+    LlmAgent --> McpServer
+
+    classDef cmpBridge fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    class BridgeServer,DesktopDriver,WebDriver,BridgeDriverIface,HttpServer,McpServer,HttpClientDriver cmpBridge
+```
+
 ## Modules
 
 | Module | What it's for |
@@ -38,6 +83,91 @@ breakdown, including where the two platforms' capabilities differ.
 | `cmp-bridge-http-server` | Standalone process. Exposes a running app's bridge over a local REST API. |
 | `cmp-bridge-mcp-server` | Standalone process. Exposes a running app's bridge over MCP (stdio), for LLM agents. |
 | `cmp-bridge-sample` | A minimal demo app plus an end-to-end test (`DemoScenarioTest`) driving it on both platforms — the best reference for wiring the bridge into your own app. |
+
+## Installing
+
+Published to Maven Central under the `com.cramsan.cmpbridge` group (see
+[RELEASING.md](RELEASING.md) if you're looking for how releases are cut). Note that
+the coordinates below only resolve once a release has actually been published — until
+then, consume this repo as a Gradle composite build
+(`includeBuild("path/to/cmp-bridge")` in `settings.gradle.kts`) or a git submodule
+instead.
+
+```kotlin
+dependencies {
+    // Embed in your app (desktop-only bridge server; the wasmJs target needs no
+    // extra dependency at all — see "How it works, briefly" above).
+    implementation("com.cramsan.cmpbridge:cmp-bridge:0.1.0")
+
+    // Add to your test source set to drive an app directly.
+    testImplementation("com.cramsan.cmpbridge:cmp-bridge-driver:0.1.0")
+
+    // ...or to drive it over HTTP instead — see "Using it in your own app" below.
+    testImplementation("com.cramsan.cmpbridge:cmp-bridge-http-client:0.1.0")
+}
+```
+
+`cmp-bridge-http-server` and `cmp-bridge-mcp-server` aren't published to Maven Central —
+they're CLI applications, not libraries, so there's no `implementation(...)` line for
+them. Run them as standalone processes instead (see "Trying it out with the sample app"
+and "Driving an app over HTTP or MCP" below): either from a
+[GitHub Release](https://github.com/CRamsan/cmp-bridge/releases) (download
+`cmp-bridge-http-server-all.jar` / `cmp-bridge-mcp-server-all.jar` and
+`java -jar` it directly — no Gradle or JDK toolchain setup needed beyond a JRE), or
+from source via `./gradlew :module:run`.
+
+## Using it in your own app
+
+**1. Embed the bridge (desktop only — web needs nothing).**
+
+```kotlin
+// desktop entry point
+fun main() = application {
+    Window(onCloseRequest = ::exitApplication) {
+        val scope = rememberCoroutineScope()
+        DesktopBridgeServer.startIfEnabled(window, scope)
+        App()
+    }
+}
+```
+
+`startIfEnabled` is a no-op unless the process is launched with
+`-DcmpBridge.enabled=true`, so this is safe to leave in a normal build.
+
+**2. Tag the elements you want to drive or read**, the same way you would for any
+accessibility-based test tool:
+
+```kotlin
+Button(onClick = { ... }, modifier = Modifier.testTag("submit_button")) { ... }
+```
+
+**3. Drive it from a test**, via `cmp-bridge-driver`:
+
+```kotlin
+val process = DesktopAppProcess.launch("com.example.myapp.desktop.MainKt")
+val driver = DesktopBridgeDriver.connect(process.host, process.port)
+ManagedBridgeDriver(process, driver).use { d ->
+    d.click("submit_button")
+    assertEquals("Done", d.waitForTag("status_text").text)
+}
+```
+
+`WasmDevServerProcess` + `WebBridgeDriver.connect(url)` is the equivalent pair for a
+wasmJs app. `cmp-bridge-sample`'s `DemoScenarioTest` is a complete, working example of
+both.
+
+**Driving it from elsewhere over HTTP.** If your test code doesn't have direct access
+to the app or dev server — only network access to a `cmp-bridge-http-server` instance
+fronting it — use `cmp-bridge-http-client`'s `HttpBridgeDriver` instead. It implements
+the same `BridgeDriver` interface, so the rest of your test code doesn't change:
+
+```kotlin
+val driver = HttpBridgeDriver.connect("http://127.0.0.1:8090")
+driver.use { d ->
+    d.click("submit_button")
+    assertEquals("Done", d.waitForTag("status_text").text)
+}
+```
 
 ## Trying it out with the sample app
 
@@ -136,63 +266,6 @@ Point an MCP client at it with a config like:
 
 or run the assembled application/fat jar directly once built, passing the same
 `--platform`/`--host`/`--port`/`--url` flags shown above.
-
-## Using it in your own app
-
-**1. Embed the bridge (desktop only — web needs nothing).**
-
-```kotlin
-// desktop entry point
-fun main() = application {
-    Window(onCloseRequest = ::exitApplication) {
-        val scope = rememberCoroutineScope()
-        DesktopBridgeServer.startIfEnabled(window, scope)
-        App()
-    }
-}
-```
-
-`startIfEnabled` is a no-op unless the process is launched with
-`-DcmpBridge.enabled=true`, so this is safe to leave in a normal build.
-
-**2. Tag the elements you want to drive or read**, the same way you would for any
-accessibility-based test tool:
-
-```kotlin
-Button(onClick = { ... }, modifier = Modifier.testTag("submit_button")) { ... }
-```
-
-**3. Drive it from a test**, via `cmp-bridge-driver`:
-
-```kotlin
-val process = DesktopAppProcess.launch("com.example.myapp.desktop.MainKt")
-val driver = DesktopBridgeDriver.connect(process.host, process.port)
-ManagedBridgeDriver(process, driver).use { d ->
-    d.click("submit_button")
-    assertEquals("Done", d.waitForTag("status_text").text)
-}
-```
-
-`WasmDevServerProcess` + `WebBridgeDriver.connect(url)` is the equivalent pair for a
-wasmJs app. `cmp-bridge-sample`'s `DemoScenarioTest` is a complete, working example of
-both.
-
-**Driving it from elsewhere over HTTP.** If your test code doesn't have direct access
-to the app or dev server — only network access to a `cmp-bridge-http-server` instance
-fronting it — use `cmp-bridge-http-client`'s `HttpBridgeDriver` instead. It implements
-the same `BridgeDriver` interface, so the rest of your test code doesn't change:
-
-```kotlin
-val driver = HttpBridgeDriver.connect("http://127.0.0.1:8090")
-driver.use { d ->
-    d.click("submit_button")
-    assertEquals("Done", d.waitForTag("status_text").text)
-}
-```
-
-This repo doesn't currently publish artifacts to a package registry; consume it as a
-Gradle composite build (`includeBuild("path/to/cmp-bridge")` in `settings.gradle.kts`)
-or as a git submodule until it does.
 
 ## License
 

@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # No Android SDK setup needed here (unlike build.yml/publish.yml): building just these two
+      # modules never touches cmp-bridge's Android target, only its jvm target — confirmed via
+      # `./gradlew :cmp-bridge-http-server:build :cmp-bridge-mcp-server:build --dry-run`.
+      - name: Build and test the CLI modules, then build their fat jars
+        run: >
+          ./gradlew :cmp-bridge-http-server:build :cmp-bridge-mcp-server:build
+          :cmp-bridge-http-server:shadowJar :cmp-bridge-mcp-server:shadowJar --console=plain
+
+      - name: Attach fat jars to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            cmp-bridge-http-server/build/libs/cmp-bridge-http-server-all.jar
+            cmp-bridge-mcp-server/build/libs/cmp-bridge-mcp-server-all.jar
