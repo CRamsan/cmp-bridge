@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
 /** Number of rows in the scrollable list — deliberately more than fit on screen at once. */
@@ -32,10 +33,10 @@ internal const val ITEM_COUNT = 40
  *
  * Every interactive/readable element carries a stable [Modifier.testTag] — the only thing either
  * platform's bridge (the real semantics tree on desktop, the real accessibility DOM on web) needs
- * to find it. Uses [BasicTextField] rather than material3's `TextField` — both were tried, and
- * both hit the same Compose Multiplatform 1.10.3 web-target gap noted in [DemoScenarioTest]
- * (a text-input element, and whatever Column sibling follows it, permanently report zero bounds
- * in the web accessibility DOM); `BasicTextField` is kept as the simpler of the two either way.
+ * to find it. Uses [BasicTextField] rather than material3's `TextField`, kept as the simpler of
+ * the two — both behave identically here. See gotcha #10 in CLAUDE.md and the wasmJs `Main.kt`
+ * doc comment: this screen used to hit a real Compose Multiplatform web-target layout bug after
+ * the text field, fixed app-side, not by anything in this file.
  */
 @Composable
 fun App() {
@@ -86,4 +87,10 @@ fun App() {
             }
         }
     }
+}
+
+@Composable
+@Preview
+private fun AppPreview() {
+    App()
 }

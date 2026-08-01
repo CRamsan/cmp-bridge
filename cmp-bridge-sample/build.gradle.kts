@@ -38,6 +38,7 @@ kotlin {
             implementation("org.jetbrains.compose.foundation:foundation:_")
             implementation("org.jetbrains.compose.material3:material3:_")
             implementation("org.jetbrains.compose.ui:ui:_")
+            implementation("org.jetbrains.compose.ui:ui-tooling-preview:_")
         }
 
         jvmMain.dependencies {
