@@ -1,3 +1,5 @@
+import de.fayard.refreshVersions.core.StabilityLevel
+
 pluginManagement {
     repositories {
         google()
@@ -24,3 +26,9 @@ include(":cmp-bridge-driver")
 include(":cmp-bridge-http-server")
 include(":cmp-bridge-mcp-server")
 include(":cmp-bridge-sample")
+
+refreshVersions {
+    rejectVersionIf {
+        candidate.stabilityLevel.isLessStableThan(current.stabilityLevel)
+    }
+}
