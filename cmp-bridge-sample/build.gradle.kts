@@ -19,7 +19,7 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain((findProperty("jdkVersion") as String).toInt())
 
     jvm()
 

@@ -21,7 +21,7 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain((findProperty("jdkVersion") as String).toInt())
 
     android {
         namespace = "com.cramsan.cmpbridge"
@@ -29,7 +29,7 @@ kotlin {
         minSdk = (findProperty("minSdkVersion") as String).toInt()
 
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(findProperty("jdkVersion") as String))
         }
 
         androidResources.enable = true
