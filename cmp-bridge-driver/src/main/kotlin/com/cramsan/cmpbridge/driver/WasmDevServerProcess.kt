@@ -35,7 +35,7 @@ class WasmDevServerProcess private constructor(
 
         /**
          * [gradleModulePath] is the app's own `launcher-web` module, e.g.
-         * `":edifikana:front-end:launcher-web"` — its `wasmJsBrowserDevelopmentRun` task is run to
+         * `":app:launcher-web"` — its `wasmJsBrowserDevelopmentRun` task is run to
          * bring up the dev server. [port] defaults to the standard Kotlin/JS webpack-dev-server
          * port; override only if an app's `webpack.config.d` pins a different one.
          */

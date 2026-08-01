@@ -36,7 +36,7 @@ class DesktopAppProcess private constructor(
 
         /**
          * [mainClass] is the app's own desktop launcher entry point, e.g.
-         * `"com.cramsan.edifikana.client.desktop.EdifikanaApplicationKt"`.
+         * `"com.example.myapp.desktop.MainKt"`.
          */
         fun launch(mainClass: String): DesktopAppProcess {
             val classpath =

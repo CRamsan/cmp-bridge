@@ -28,6 +28,13 @@ private val json = Json { ignoreUnknownKeys = true }
  * never itself `null`/absent the way a semantics property can be, so an element with no textual
  * content reports `""` here rather than `null` (confirmed live: naively falling back to `null` on
  * an empty string via `||` broke reading a freshly-focused, still-empty text field).
+ *
+ * **Known unfixable gap**: unlike `DesktopBridgeServer` (which suppresses `text`/
+ * `contentDescription` for password fields), this walk has no way to suppress a password field's
+ * real text. Compose Web's own accessibility-DOM sync doesn't check for
+ * `SemanticsProperties.Password` before setting `innerText`, so a field marked
+ * `Modifier.semantics { password() }` can still leak its real content through `text` here — there's
+ * no client-side workaround, the fix would have to happen upstream in Compose Web itself.
  */
 private const val WALK_ACCESSIBILITY_TREE_JS = """
 () => {

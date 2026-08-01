@@ -1,7 +1,13 @@
 # cmp-bridge
 
+[![Build](https://github.com/CRamsan/cmp-bridge/actions/workflows/build.yml/badge.svg)](https://github.com/CRamsan/cmp-bridge/actions/workflows/build.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 Drive and inspect a live [Compose Multiplatform](https://www.jetbrains.com/compose-multiplatform/) UI over a
 typed wire protocol — for end-to-end tests and for AI clients that want to explore an app's real screen.
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the module map, design rationale, and build system
+notes. Contributing? Start with [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 `cmp-bridge` doesn't simulate your UI. On desktop it reads Compose's real semantics tree
 (`ComposeWindow.semanticsOwners`) and drives it with genuine AWT input events. On web it reads Compose

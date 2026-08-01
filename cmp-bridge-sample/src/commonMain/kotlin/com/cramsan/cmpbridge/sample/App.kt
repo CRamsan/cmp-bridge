@@ -34,9 +34,10 @@ internal const val ITEM_COUNT = 40
  * Every interactive/readable element carries a stable [Modifier.testTag] — the only thing either
  * platform's bridge (the real semantics tree on desktop, the real accessibility DOM on web) needs
  * to find it. Uses [BasicTextField] rather than material3's `TextField`, kept as the simpler of
- * the two — both behave identically here. See gotcha #10 in CLAUDE.md and the wasmJs `Main.kt`
- * doc comment: this screen used to hit a real Compose Multiplatform web-target layout bug after
- * the text field, fixed app-side, not by anything in this file.
+ * the two — both behave identically here. This screen used to hit a real Compose Multiplatform
+ * web-target layout bug after the text field (every element following it collapsed to zero bounds);
+ * see the wasmJs `Main.kt` doc comment for the root cause and fix — it was fixed app-side, not by
+ * anything in this file.
  */
 @Composable
 fun App() {

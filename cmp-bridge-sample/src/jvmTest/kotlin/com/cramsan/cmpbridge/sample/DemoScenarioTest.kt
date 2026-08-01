@@ -14,10 +14,9 @@ import kotlin.test.assertTrue
 /**
  * Drives the [App] sample screen through [BridgeDriver] on both platforms — desktop over the
  * socket bridge, web over Compose Multiplatform's own accessibility DOM — as the concrete proof
- * that `BridgeDriver` is one contract with two backends. See `CLAUDE.md` for why no equivalent
- * test existed before this: the original monorepo's E2E suites depended on app fixtures
- * (`framework-samples`/`edifikana`) that don't exist standalone, so extraction dropped them. This
- * module is that fixture, rebuilt.
+ * that `BridgeDriver` is one contract with two backends. No equivalent test existed before this
+ * module: the original E2E suites this library was extracted alongside depended on app fixtures
+ * that don't exist standalone. This module is that fixture, rebuilt from scratch.
  *
  * Desktop exercises all five `BridgeDriver` operations end to end. Web exercises three of five —
  * see the web test's own doc comment for the two it deliberately doesn't, and why.
@@ -39,8 +38,8 @@ class DemoScenarioTest {
 
             // A freshly-launched window's very first click can silently miss (confirmed live: the
             // bridge's socket accepts connections slightly before the window is actually
-            // input-ready, the same class of settling gap CLAUDE.md documents for transient
-            // degenerate bounds) — so retry the click itself, not just the read.
+            // input-ready, the same class of settling gap BridgeDriver.getBounds() guards against
+            // for transient degenerate bounds) — so retry the click itself, not just the read.
             for (expected in 1..3) {
                 d.clickUntilText("increment_button", "counter_text", "Count: $expected")
             }
@@ -87,11 +86,11 @@ class DemoScenarioTest {
             //    material3 TextField and the simpler BasicTextField — same result either way)
             //    permanently reports (0,0,0,0) bounds in the accessibility DOM, and so does
             //    whatever Column sibling immediately follows it. Stable across 12+ seconds of
-            //    polling, so this is not the transient settling gap in CLAUDE.md gotcha #1 — a
-            //    getBounds()-based click can never locate it. getHierarchy() still reports its
-            //    correct *text* (confirmed live), just never a usable bounding box.
+            //    polling, so this is not the transient settling gap BridgeDriver.getBounds() already
+            //    guards against — a getBounds()-based click can never locate it. getHierarchy()
+            //    still reports its correct *text* (confirmed live), just never a usable bounding box.
             // 2. scroll(): known-unverified in this sandbox's headless Chromium fallback build —
-            //    CLAUDE.md gotcha #4 / WebBridgeDriver.scroll()'s own doc comment.
+            //    see WebBridgeDriver.scroll()'s own doc comment.
             //
             // What *is* verified below: getHierarchy() reflects the live DOM even for a
             // zero-bounds node (reading "greeting_text" directly, bypassing the bounds filter),

@@ -11,9 +11,14 @@ import org.jetbrains.skiko.wasm.onWasmReady
  * [App] from the outside via a real headless browser.
  *
  * [onWasmReady] wrapping the no-arg [ComposeViewport] (rather than calling
- * `ComposeViewport(document.body!!) { App() }` directly) is load-bearing, not stylistic — see
- * gotcha #10 in CLAUDE.md: without it, the layout pass for content placed after a text-input
- * composable permanently stalled with zero bounds on this Compose Multiplatform version.
+ * `ComposeViewport(document.body!!) { App() }` directly) is load-bearing, not stylistic. Without
+ * it, on this Compose Multiplatform version, `ComposeViewport` could start rendering against a
+ * `<body>` with no established size and before the wasm runtime had actually finished loading — the
+ * very first layout pass measured against a degenerate viewport, and content placed after a
+ * text-input composable (confirmed live: [App]'s name field, greeting text, and item list)
+ * permanently stalled with zero bounds afterward, never getting a correct subsequent pass. Fixed
+ * together with `index.html`'s `<meta name="viewport">` tag and `styles.css` forcing
+ * `html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }`.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {

@@ -1,7 +1,7 @@
 ## Shared detekt config for all modules. Loaded with buildUponDefaultConfig = true (each module's
 ## build.gradle.kts), so anything not listed here just falls back to detekt's own shipped defaults
 ## plus the detekt-formatting ruleset's defaults (autoCorrect via `./gradlew detekt --auto-correct`).
-## Only overrides that have a real, repo-specific reason live here — see CLAUDE.md for context.
+## Only overrides that have a real, repo-specific reason live here — see the comment on each one.
 
 naming:
   # @Composable functions are conventionally PascalCase (they read like a type/widget, not a verb) —

@@ -195,9 +195,9 @@ object DesktopBridgeServer {
     private fun SemanticsNode.toHierarchyNode(): HierarchyNode {
         val bounds = boundsInWindow
         val cfg = config
-        // A field marked `password()` (see EdifikanaPasswordTextField) never surfaces its real
-        // content through this bridge, even in a debug build — `PasswordVisualTransformation`
-        // only masks the drawn glyphs, not what Compose's semantics tree itself reports.
+        // A field marked `password()` never surfaces its real content through this bridge, even
+        // in a debug build — `PasswordVisualTransformation` only masks the drawn glyphs, not what
+        // Compose's semantics tree itself reports.
         val isPassword = cfg.contains(SemanticsProperties.Password)
         return HierarchyNode(
             testTag = cfg.valueOrNull(SemanticsProperties.TestTag),
