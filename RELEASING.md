@@ -3,10 +3,9 @@
 Maintainer-only notes for releasing cmp-bridge. A single `vX.Y.Z` tag push drives two independent
 GitHub Actions workflows:
 
-- **`.github/workflows/publish.yml`** publishes `cmp-bridge`, `cmp-bridge-driver`, and
-  `cmp-bridge-http-client` to Maven Central — the only three modules meant to be depended on as
-  libraries (see the `mavenPublishing { ... }` block duplicated across each one's
-  `build.gradle.kts`).
+- **`.github/workflows/publish.yml`** publishes `cmp-bridge` and `cmp-bridge-driver` to Maven
+  Central — the only two modules meant to be depended on as libraries (see the
+  `mavenPublishing { ... }` block duplicated across each one's `build.gradle.kts`).
 - **`.github/workflows/release.yml`** builds `cmp-bridge-http-server` and `cmp-bridge-mcp-server`
   as runnable fat jars and attaches them to a GitHub Release. These two are CLI applications, not
   libraries — nobody adds a CLI tool as a Gradle dependency — so they're distributed as standalone
@@ -59,7 +58,7 @@ Maven Central publishing targets Sonatype's **Central Publisher Portal** (`centr
    re-run on its own via `workflow_dispatch` if only one of them fails.
 3. `publish.yml` runs `./gradlew build publishToMavenCentral` — the same `build` bar as CI, then an
    upload per published module. Once it finishes, log into Central Portal and manually click
-   "Publish" on each of the 3 pending deployments to actually release them. Every
+   "Publish" on each of the 2 pending deployments to actually release them. Every
    `mavenPublishing { }` block is deliberately left at `publishToMavenCentral()`'s default (leave
    deployments "pending" rather than `automaticRelease = true`), so this manual step is required
    for every release — that's intentional, not a bug, so the first upload of a new version can be
@@ -111,8 +110,7 @@ Things worth checking in that output, given how much of this setup was non-obvio
 the first time (see the comments in each module's `mavenPublishing { }` block for the specifics):
 
 - `cmp-bridge` produces 4 target-publications: root/metadata, `-android`, `-jvm`, `-wasm-js`.
-- `cmp-bridge-driver` and `cmp-bridge-http-client` each produce the plain jar + sources + javadoc,
-  nothing else.
+- `cmp-bridge-driver` produces the plain jar + sources + javadoc, nothing else.
 - POM contents render correctly for a sampled module or two: license, SCM URLs, and the
   `developer` block.
 - Neither `cmp-bridge-http-server` nor `cmp-bridge-mcp-server` produces anything under

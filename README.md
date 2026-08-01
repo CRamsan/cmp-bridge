@@ -33,44 +33,17 @@ test code, curl, an LLM agent — is external to this project and just talks to 
 
 ```mermaid
 graph TB
-    subgraph desktopApp["Your app under test — desktop process"]
-        ComposeWindow["ComposeWindow<br/>(real semantics tree)"]
-        BridgeServer["DesktopBridgeServer<br/>cmp-bridge, embedded, opt-in"]
-        ComposeWindow --- BridgeServer
-    end
+  bridge["cmp-bridge<br/>(embedded in the app under test)"]
+  driver["cmp-bridge-driver<br/>(BridgeDriver + platform implementations)"]
+  http["cmp-bridge-http-server<br/>(REST CLI)"]
+  mcp["cmp-bridge-mcp-server<br/>(MCP CLI)"]
+  sample["cmp-bridge-sample<br/>(demo app + E2E fixture)"]
 
-    subgraph webApp["Your app under test — browser tab"]
-        A11yDom["Compose Web's built-in<br/>accessibility DOM"]
-    end
-
-    subgraph drivers["cmp-bridge-driver"]
-        DesktopDriver["DesktopBridgeDriver"]
-        WebDriver["WebBridgeDriver<br/>via Playwright"]
-    end
-
-    BridgeServer <-->|"JSON commands<br/>over TCP socket"| DesktopDriver
-    WebDriver -->|"real input events<br/>(Playwright)"| A11yDom
-    A11yDom -->|"live tree"| WebDriver
-
-    DesktopDriver -. implements .-> BridgeDriverIface(("BridgeDriver<br/>interface"))
-    WebDriver -. implements .-> BridgeDriverIface
-
-    BridgeDriverIface --> YourTest["Your JVM test code"]
-    BridgeDriverIface --> HttpServer["cmp-bridge-http-server<br/>REST · POST /bridge"]
-    BridgeDriverIface --> McpServer["cmp-bridge-mcp-server<br/>MCP over stdio"]
-
-    subgraph external["External clients"]
-        Curl["curl / any HTTP client"]
-        HttpClientDriver["cmp-bridge-http-client<br/>HttpBridgeDriver"]
-        LlmAgent["LLM agent<br/>e.g. Claude Desktop"]
-    end
-
-    Curl --> HttpServer
-    HttpClientDriver --> HttpServer
-    LlmAgent --> McpServer
-
-    classDef cmpBridge fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
-    class BridgeServer,DesktopDriver,WebDriver,BridgeDriverIface,HttpServer,McpServer,HttpClientDriver cmpBridge
+  driver -->|api, for HierarchyNode/protocol types| bridge
+  http -->|api| driver
+  mcp -->|api| driver
+  sample -.jvmMain depends on.-> bridge
+  sample -.jvmTest depends on.-> driver
 ```
 
 ## Modules
@@ -79,7 +52,6 @@ graph TB
 |---|---|
 | `cmp-bridge` | Add to your app. Defines the wire protocol and runs the in-process bridge server on desktop. |
 | `cmp-bridge-driver` | Add to your test source set. `BridgeDriver` plus its desktop/web implementations and helpers to launch a disposable app/dev-server instance. |
-| `cmp-bridge-http-client` | Add to your test source set instead of `cmp-bridge-driver`'s own drivers when you only have network access to a running `cmp-bridge-http-server` — implements `BridgeDriver` over its REST API. |
 | `cmp-bridge-http-server` | Standalone process. Exposes a running app's bridge over a local REST API. |
 | `cmp-bridge-mcp-server` | Standalone process. Exposes a running app's bridge over MCP (stdio), for LLM agents. |
 | `cmp-bridge-sample` | A minimal demo app plus an end-to-end test (`DemoScenarioTest`) driving it on both platforms — the best reference for wiring the bridge into your own app. |
@@ -101,9 +73,6 @@ dependencies {
 
     // Add to your test source set to drive an app directly.
     testImplementation("com.cramsan.cmpbridge:cmp-bridge-driver:0.1.0")
-
-    // ...or to drive it over HTTP instead — see "Using it in your own app" below.
-    testImplementation("com.cramsan.cmpbridge:cmp-bridge-http-client:0.1.0")
 }
 ```
 
@@ -155,19 +124,6 @@ ManagedBridgeDriver(process, driver).use { d ->
 `WasmDevServerProcess` + `WebBridgeDriver.connect(url)` is the equivalent pair for a
 wasmJs app. `cmp-bridge-sample`'s `DemoScenarioTest` is a complete, working example of
 both.
-
-**Driving it from elsewhere over HTTP.** If your test code doesn't have direct access
-to the app or dev server — only network access to a `cmp-bridge-http-server` instance
-fronting it — use `cmp-bridge-http-client`'s `HttpBridgeDriver` instead. It implements
-the same `BridgeDriver` interface, so the rest of your test code doesn't change:
-
-```kotlin
-val driver = HttpBridgeDriver.connect("http://127.0.0.1:8090")
-driver.use { d ->
-    d.click("submit_button")
-    assertEquals("Done", d.waitForTag("status_text").text)
-}
-```
 
 ## Trying it out with the sample app
 

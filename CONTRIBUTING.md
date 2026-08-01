@@ -58,12 +58,11 @@ When adding a *new* dependency, declare it in the module's `build.gradle.kts` wi
 The one documented exception is Ktor libraries in `cmp-bridge-http-server`: that module
 applies the `io.ktor.plugin` Gradle plugin, which version-aligns Ktor artifacts itself,
 so they're declared *without* a trailing `:_` there — see the comment above the Ktor
-dependencies in that module's `build.gradle.kts`. `cmp-bridge-http-client` also depends
-on Ktor (its client artifacts), but is a library rather than an application, so it
-deliberately does *not* apply that plugin — applying it unconditionally wires up
-`shadowJar`/`dist*`/`startScripts` tasks aimed at a runnable app, which fail without a
-`mainClass`. Its Ktor client dependencies use the ordinary `:_` placeholder instead.
-Check whether a module applies `io.ktor.plugin` before copying either pattern.
+dependencies in that module's `build.gradle.kts`. That plugin is aimed at runnable
+applications (it unconditionally wires up `shadowJar`/`dist*`/`startScripts` tasks,
+which fail without a `mainClass`), so don't reach for it in a module that's a library
+rather than an application — use the ordinary `:_` placeholder for Ktor dependencies
+there instead.
 
 ## Code style
 
@@ -113,11 +112,8 @@ a checklist:
    it silently unsupported.
 3. `cmp-bridge-http-server`: add an `operation` branch (and, if it takes arguments, a
    payload data class) in `Routes.kt`'s `POST /bridge` handler.
-4. `cmp-bridge-http-client`: add the matching call to `HttpBridgeDriver` (and payload
-   data class, mirroring the one added to `Routes.kt` in the step above — the two are
-   kept in sync by hand, not shared through a third module).
-5. `cmp-bridge-mcp-server`: add the MCP tool in `Tools.kt`.
-6. `cmp-bridge-sample`: exercise the new operation from `DemoScenarioTest` on both
+4. `cmp-bridge-mcp-server`: add the MCP tool in `Tools.kt`.
+5. `cmp-bridge-sample`: exercise the new operation from `DemoScenarioTest` on both
    platforms (or document why one platform is skipped, as the web test already does for
    the operations it can't cover) — this is what actually proves the change works
    end to end, not just that it compiles.
