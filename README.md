@@ -80,27 +80,33 @@ launches it. Run either with `--help` for the full option list.
 Both standalone servers wrap the exact same five `BridgeDriver` operations — pick
 whichever transport fits your tooling.
 
-**HTTP (`cmp-bridge-http-server`)** exposes them as plain REST, on `--server-port`
-(default `8090`):
+**HTTP (`cmp-bridge-http-server`)** exposes them all behind a single endpoint,
+`POST /bridge` (on `--server-port`, default `8090`). The request body is an envelope —
+`{"operation": "...", "payload": {...}}` — where `operation` picks the driver call and
+`payload` is that operation's own arguments (omitted for the two that take none):
 
-| Endpoint | Description |
-|---|---|
-| `GET /hierarchy` | Returns the app's current `HierarchyNode` tree as JSON. |
-| `POST /click` `{"tag": "..."}` | Real synthetic click on the element with that test tag. |
-| `POST /setText` `{"tag": "...", "text": "..."}` | Clicks the element, then types `text` into it. |
-| `POST /scroll` `{"anchorTag": "...", "deltaY": N}` | Scroll gesture centered on `anchorTag`'s bounds. |
-| `GET /screenshot` | The app's current frame as a PNG (binary response). |
+| `operation` | `payload` | Description |
+|---|---|---|
+| `getHierarchy` | — | Returns the app's current `HierarchyNode` tree as JSON. |
+| `click` | `{"tag": "..."}` | Real synthetic click on the element with that test tag. |
+| `setText` | `{"tag": "...", "text": "..."}` | Clicks the element, then types `text` into it. |
+| `scroll` | `{"anchorTag": "...", "deltaY": N}` | Scroll gesture centered on `anchorTag`'s bounds. |
+| `screenshot` | — | The app's current frame as a PNG (binary response). |
 
 ```bash
-curl http://127.0.0.1:8090/hierarchy
-curl -X POST http://127.0.0.1:8090/click -H 'Content-Type: application/json' -d '{"tag":"increment_button"}'
-curl -X POST http://127.0.0.1:8090/setText -H 'Content-Type: application/json' -d '{"tag":"name_field","text":"Ada"}'
-curl -X POST http://127.0.0.1:8090/scroll -H 'Content-Type: application/json' -d '{"anchorTag":"item_list","deltaY":5}'
-curl http://127.0.0.1:8090/screenshot -o screenshot.png
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' -d '{"operation":"getHierarchy"}'
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"operation":"click","payload":{"tag":"increment_button"}}'
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"operation":"setText","payload":{"tag":"name_field","text":"Ada"}}'
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"operation":"scroll","payload":{"anchorTag":"item_list","deltaY":5}}'
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"operation":"screenshot"}' -o screenshot.png
 ```
 
-A failed operation (unknown tag, timeout, ...) comes back as `400` with
-`{"error": "..."}` rather than a stack trace.
+A failed operation (unknown tag, timeout, an unrecognized `operation`, ...) comes back
+as `400` with `{"error": "..."}` rather than a stack trace.
 
 **MCP (`cmp-bridge-mcp-server`)** exposes the same operations as MCP tools over stdio,
 for pointing an LLM agent (Claude, or any other MCP client) at a running app:

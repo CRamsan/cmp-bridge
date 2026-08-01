@@ -106,7 +106,8 @@ a checklist:
    it, say so in a doc comment on the interface method and in `WebBridgeDriver`'s
    implementation, the way `scroll`'s known-issue gap is documented today — don't leave
    it silently unsupported.
-3. `cmp-bridge-http-server`: add the REST route in `Routes.kt`.
+3. `cmp-bridge-http-server`: add an `operation` branch (and, if it takes arguments, a
+   payload data class) in `Routes.kt`'s `POST /bridge` handler.
 4. `cmp-bridge-mcp-server`: add the MCP tool in `Tools.kt`.
 5. `cmp-bridge-sample`: exercise the new operation from `DemoScenarioTest` on both
    platforms (or document why one platform is skipped, as the web test already does for

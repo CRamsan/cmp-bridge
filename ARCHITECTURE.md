@@ -144,11 +144,13 @@ adapts its five operations to a different transport. Neither ever launches an ap
 both assume one is already running with the bridge armed (or a wasmJs dev server is
 already up).
 
-- **`cmp-bridge-http-server`**: Ktor + Netty, plain REST — `GET /hierarchy`,
-  `POST /click`/`/setText`/`/scroll`, `GET /screenshot`. `Routes.kt` is a thin adapter
-  only; every route calls straight into the driver, and `BridgeDriver` failures are
-  surfaced as `400` with the exception's message via a `StatusPages` handler, not a
-  generic `500`.
+- **`cmp-bridge-http-server`**: Ktor + Netty, a single `POST /bridge` endpoint. The
+  request body is an envelope, `{"operation": "...", "payload": {...}}`, dispatched in
+  `Routes.kt` on `operation` to the matching `BridgeDriver` call with `payload` decoded
+  into that operation's own argument type. `Routes.kt` is a thin adapter only; every
+  branch calls straight into the driver, and `BridgeDriver` failures — including an
+  unrecognized `operation` — are surfaced as `400` with the exception's message via a
+  `StatusPages` handler, not a generic `500`.
 - **`cmp-bridge-mcp-server`**: MCP over stdio (`kotlin-sdk`), one tool per driver
   operation (`get_hierarchy`, `click`, `set_text`, `scroll`, `screenshot`), registered in
   `Tools.kt`. Because the MCP JSON-RPC stream *is* stdout, `main` captures the real

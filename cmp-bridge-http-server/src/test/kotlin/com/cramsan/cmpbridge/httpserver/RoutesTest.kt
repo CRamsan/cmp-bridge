@@ -3,7 +3,6 @@ package com.cramsan.cmpbridge.httpserver
 import com.cramsan.cmpbridge.HierarchyNode
 import com.cramsan.cmpbridge.driver.BridgeDriver
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsBytes
@@ -60,23 +59,30 @@ private class FakeBridgeDriver : BridgeDriver {
 
 class RoutesTest {
     @Test
-    fun `GET hierarchy returns the driver's tree`() = testApplication {
+    fun `POST bridge with getHierarchy returns the driver's tree`() = testApplication {
         application { bridgeHttpModule(FakeBridgeDriver()) }
-        val response = client.get("/hierarchy")
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"operation":"getHierarchy"}""")
+            }
+
         assertEquals(HttpStatusCode.OK, response.status)
         assertTrue(response.bodyAsText().contains("\"width\":100.0"))
     }
 
     @Test
-    fun `POST click delegates to the driver`() = testApplication {
+    fun `POST bridge with click delegates to the driver`() = testApplication {
         val driver = FakeBridgeDriver()
         application { bridgeHttpModule(driver) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
-            client.post("/click") {
+            client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"tag":"my_tag"}""")
+                setBody("""{"operation":"click","payload":{"tag":"my_tag"}}""")
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -84,15 +90,15 @@ class RoutesTest {
     }
 
     @Test
-    fun `POST setText delegates to the driver`() = testApplication {
+    fun `POST bridge with setText delegates to the driver`() = testApplication {
         val driver = FakeBridgeDriver()
         application { bridgeHttpModule(driver) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
-            client.post("/setText") {
+            client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"tag":"my_tag","text":"hello"}""")
+                setBody("""{"operation":"setText","payload":{"tag":"my_tag","text":"hello"}}""")
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -100,15 +106,15 @@ class RoutesTest {
     }
 
     @Test
-    fun `POST scroll delegates to the driver`() = testApplication {
+    fun `POST bridge with scroll delegates to the driver`() = testApplication {
         val driver = FakeBridgeDriver()
         application { bridgeHttpModule(driver) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
-            client.post("/scroll") {
+            client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"anchorTag":"my_tag","deltaY":40}""")
+                setBody("""{"operation":"scroll","payload":{"anchorTag":"my_tag","deltaY":40}}""")
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -116,15 +122,30 @@ class RoutesTest {
     }
 
     @Test
-    fun `POST click on a failing driver returns 400 with the error message`() = testApplication {
+    fun `POST bridge with screenshot returns PNG bytes`() = testApplication {
+        application { bridgeHttpModule(FakeBridgeDriver()) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"operation":"screenshot"}""")
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(0x89.toByte(), response.bodyAsBytes()[0])
+    }
+
+    @Test
+    fun `POST bridge with click on a failing driver returns 400 with the error message`() = testApplication {
         val driver = FakeBridgeDriver().apply { shouldFailClick = true }
         application { bridgeHttpModule(driver) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
-            client.post("/click") {
+            client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"tag":"missing"}""")
+                setBody("""{"operation":"click","payload":{"tag":"missing"}}""")
             }
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
@@ -132,10 +153,17 @@ class RoutesTest {
     }
 
     @Test
-    fun `GET screenshot returns PNG bytes`() = testApplication {
+    fun `POST bridge with an unknown operation returns 400`() = testApplication {
         application { bridgeHttpModule(FakeBridgeDriver()) }
-        val response = client.get("/screenshot")
-        assertEquals(HttpStatusCode.OK, response.status)
-        assertEquals(0x89.toByte(), response.bodyAsBytes()[0])
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"operation":"bogus"}""")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertTrue(response.bodyAsText().contains("Unknown operation"))
     }
 }
