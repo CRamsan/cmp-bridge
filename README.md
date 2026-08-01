@@ -75,6 +75,61 @@ Then, once the dev server is up:
 Both standalone servers assume the app (or dev server) is already running — neither one
 launches it. Run either with `--help` for the full option list.
 
+## Driving an app over HTTP or MCP
+
+Both standalone servers wrap the exact same five `BridgeDriver` operations — pick
+whichever transport fits your tooling.
+
+**HTTP (`cmp-bridge-http-server`)** exposes them as plain REST, on `--server-port`
+(default `8090`):
+
+| Endpoint | Description |
+|---|---|
+| `GET /hierarchy` | Returns the app's current `HierarchyNode` tree as JSON. |
+| `POST /click` `{"tag": "..."}` | Real synthetic click on the element with that test tag. |
+| `POST /setText` `{"tag": "...", "text": "..."}` | Clicks the element, then types `text` into it. |
+| `POST /scroll` `{"anchorTag": "...", "deltaY": N}` | Scroll gesture centered on `anchorTag`'s bounds. |
+| `GET /screenshot` | The app's current frame as a PNG (binary response). |
+
+```bash
+curl http://127.0.0.1:8090/hierarchy
+curl -X POST http://127.0.0.1:8090/click -H 'Content-Type: application/json' -d '{"tag":"increment_button"}'
+curl -X POST http://127.0.0.1:8090/setText -H 'Content-Type: application/json' -d '{"tag":"name_field","text":"Ada"}'
+curl -X POST http://127.0.0.1:8090/scroll -H 'Content-Type: application/json' -d '{"anchorTag":"item_list","deltaY":5}'
+curl http://127.0.0.1:8090/screenshot -o screenshot.png
+```
+
+A failed operation (unknown tag, timeout, ...) comes back as `400` with
+`{"error": "..."}` rather than a stack trace.
+
+**MCP (`cmp-bridge-mcp-server`)** exposes the same operations as MCP tools over stdio,
+for pointing an LLM agent (Claude, or any other MCP client) at a running app:
+
+| Tool | Arguments |
+|---|---|
+| `get_hierarchy` | — |
+| `click` | `tag` |
+| `set_text` | `tag`, `text` |
+| `scroll` | `anchorTag`, `deltaY` |
+| `screenshot` | — (returns an image, not text) |
+
+Point an MCP client at it with a config like:
+
+```json
+{
+  "mcpServers": {
+    "cmp-bridge": {
+      "command": "/path/to/cmp-bridge/gradlew",
+      "args": ["-q", "--project-dir", "/path/to/cmp-bridge", ":cmp-bridge-mcp-server:run",
+               "--args=--platform desktop"]
+    }
+  }
+}
+```
+
+or run the assembled application/fat jar directly once built, passing the same
+`--platform`/`--host`/`--port`/`--url` flags shown above.
+
 ## Using it in your own app
 
 **1. Embed the bridge (desktop only — web needs nothing).**
