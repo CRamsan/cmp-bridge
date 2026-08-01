@@ -1,8 +1,8 @@
 plugins {
     application
-    alias(libs.plugins.kotlin.jvm)
-    alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.detekt)
+    id("org.jetbrains.kotlin.jvm")
+    id("org.jetbrains.kotlin.plugin.serialization")
+    id("dev.detekt")
 }
 
 java {
@@ -23,17 +23,17 @@ detekt {
 dependencies {
     api(project(":cmp-bridge-driver"))
 
-    implementation(libs.mcp.kotlin.sdk)
-    implementation(libs.kotlinx.io.core)
-    implementation(libs.clikt)
+    implementation("io.modelcontextprotocol:kotlin-sdk:_")
+    implementation("org.jetbrains.kotlinx:kotlinx-io-core:_")
+    implementation("com.github.ajalt.clikt:clikt:_")
 
-    detektPlugins(libs.detekt.formatting)
+    detektPlugins("dev.detekt:detekt-rules-ktlint-wrapper:_")
 
-    testImplementation(libs.kotlin.test.junit5)
-    testImplementation(libs.junit.jupiter.api)
-    testImplementation(libs.junit.jupiter.params)
-    testRuntimeOnly(libs.junit.jupiter.engine)
-    testRuntimeOnly(libs.junit.platform.launcher)
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:_")
+    testImplementation("org.junit.jupiter:junit-jupiter-api:_")
+    testImplementation("org.junit.jupiter:junit-jupiter-params:_")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:_")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:_")
 }
 
 tasks.named<Test>("test") {

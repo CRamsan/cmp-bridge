@@ -3,12 +3,12 @@
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 
 plugins {
-    alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.compose.multiplatform)
-    alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.detekt)
+    id("org.jetbrains.kotlin.multiplatform")
+    id("org.jetbrains.kotlin.plugin.serialization")
+    id("org.jetbrains.compose")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("com.android.kotlin.multiplatform.library")
+    id("dev.detekt")
 }
 
 detekt {
@@ -17,7 +17,7 @@ detekt {
 }
 
 dependencies {
-    detektPlugins(libs.detekt.formatting)
+    detektPlugins("dev.detekt:detekt-rules-ktlint-wrapper:_")
 }
 
 kotlin {
@@ -43,20 +43,20 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.kotlinx.serialization.json)
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:_")
         }
 
         jvmMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:_")
             implementation(compose.desktop.currentOs)
         }
 
         jvmTest.dependencies {
-            implementation(libs.kotlin.test.junit5)
-            implementation(libs.junit.jupiter.api)
-            implementation(libs.junit.jupiter.params)
-            runtimeOnly(libs.junit.jupiter.engine)
-            runtimeOnly(libs.junit.platform.launcher)
+            implementation("org.jetbrains.kotlin:kotlin-test-junit5:_")
+            implementation("org.junit.jupiter:junit-jupiter-api:_")
+            implementation("org.junit.jupiter:junit-jupiter-params:_")
+            runtimeOnly("org.junit.jupiter:junit-jupiter-engine:_")
+            runtimeOnly("org.junit.platform:junit-platform-launcher:_")
         }
     }
 }

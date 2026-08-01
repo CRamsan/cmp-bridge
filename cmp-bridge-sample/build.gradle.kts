@@ -3,10 +3,10 @@
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 
 plugins {
-    alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.compose.multiplatform)
-    alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.detekt)
+    id("org.jetbrains.kotlin.multiplatform")
+    id("org.jetbrains.compose")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("dev.detekt")
 }
 
 detekt {
@@ -15,7 +15,7 @@ detekt {
 }
 
 dependencies {
-    detektPlugins(libs.detekt.formatting)
+    detektPlugins("dev.detekt:detekt-rules-ktlint-wrapper:_")
 }
 
 kotlin {
@@ -31,13 +31,13 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            // compose.runtime/.foundation/.material3/.ui are deprecated in compose-multiplatform
-            // 1.10.3 in favor of direct coordinates. Versions pinned to what this Compose release
-            // actually ships (material3 tracks its own version, independent of the rest).
-            implementation("org.jetbrains.compose.runtime:runtime:${libs.versions.compose.multiplatform.get()}")
-            implementation("org.jetbrains.compose.foundation:foundation:${libs.versions.compose.multiplatform.get()}")
-            implementation("org.jetbrains.compose.material3:material3:1.9.0")
-            implementation("org.jetbrains.compose.ui:ui:${libs.versions.compose.multiplatform.get()}")
+            // Direct coordinates, not compose.runtime/.foundation/.material3/.ui: those accessors
+            // are deprecated in compose-multiplatform 1.10.3. material3 tracks its own version,
+            // independent of the rest of Compose Multiplatform.
+            implementation("org.jetbrains.compose.runtime:runtime:_")
+            implementation("org.jetbrains.compose.foundation:foundation:_")
+            implementation("org.jetbrains.compose.material3:material3:_")
+            implementation("org.jetbrains.compose.ui:ui:_")
         }
 
         jvmMain.dependencies {
@@ -47,11 +47,11 @@ kotlin {
 
         jvmTest.dependencies {
             implementation(project(":cmp-bridge-driver"))
-            implementation(libs.kotlin.test.junit5)
-            implementation(libs.junit.jupiter.api)
-            implementation(libs.junit.jupiter.params)
-            runtimeOnly(libs.junit.jupiter.engine)
-            runtimeOnly(libs.junit.platform.launcher)
+            implementation("org.jetbrains.kotlin:kotlin-test-junit5:_")
+            implementation("org.junit.jupiter:junit-jupiter-api:_")
+            implementation("org.junit.jupiter:junit-jupiter-params:_")
+            runtimeOnly("org.junit.jupiter:junit-jupiter-engine:_")
+            runtimeOnly("org.junit.platform:junit-platform-launcher:_")
         }
     }
 }

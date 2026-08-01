@@ -1,7 +1,7 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
-    alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.detekt)
+    id("org.jetbrains.kotlin.jvm")
+    id("org.jetbrains.kotlin.plugin.serialization")
+    id("dev.detekt")
 }
 
 java {
@@ -18,17 +18,17 @@ detekt {
 dependencies {
     api(project(":cmp-bridge"))
 
-    implementation(libs.kotlinx.serialization.json)
-    implementation(libs.playwright)
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:_")
+    implementation("com.microsoft.playwright:playwright:_")
 
-    detektPlugins(libs.detekt.formatting)
+    detektPlugins("dev.detekt:detekt-rules-ktlint-wrapper:_")
 
-    testImplementation(libs.kotlin.test.junit5)
-    testImplementation(libs.junit.jupiter.api)
-    testImplementation(libs.junit.jupiter.params)
-    testImplementation(libs.mockk)
-    testRuntimeOnly(libs.junit.jupiter.engine)
-    testRuntimeOnly(libs.junit.platform.launcher)
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:_")
+    testImplementation("org.junit.jupiter:junit-jupiter-api:_")
+    testImplementation("org.junit.jupiter:junit-jupiter-params:_")
+    testImplementation("io.mockk:mockk:_")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:_")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:_")
 }
 
 tasks.named<Test>("test") {

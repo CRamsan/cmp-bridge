@@ -1,9 +1,9 @@
 plugins {
     application
-    alias(libs.plugins.kotlin.jvm)
-    alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.ktor.plugin)
-    alias(libs.plugins.detekt)
+    id("org.jetbrains.kotlin.jvm")
+    id("org.jetbrains.kotlin.plugin.serialization")
+    id("io.ktor.plugin")
+    id("dev.detekt")
 }
 
 java {
@@ -24,23 +24,26 @@ detekt {
 dependencies {
     api(project(":cmp-bridge-driver"))
 
-    implementation(libs.ktor.server.core)
-    implementation(libs.ktor.server.netty)
-    implementation(libs.ktor.server.content.negotiation)
-    implementation(libs.ktor.server.call.logging)
-    implementation(libs.ktor.server.status.pages)
-    implementation(libs.ktor.serialization.kotlinx.json)
-    implementation(libs.clikt)
+    // No trailing ":_" on these: their version comes from the io.ktor.plugin Gradle plugin's own
+    // BOM-style alignment (applied above), not from an explicit version anywhere — matching how
+    // the version catalog declared them with no version.ref either. Don't add a placeholder here.
+    implementation("io.ktor:ktor-server-core-jvm")
+    implementation("io.ktor:ktor-server-netty-jvm")
+    implementation("io.ktor:ktor-server-content-negotiation")
+    implementation("io.ktor:ktor-server-call-logging")
+    implementation("io.ktor:ktor-server-status-pages")
+    implementation("io.ktor:ktor-serialization-kotlinx-json")
+    implementation("com.github.ajalt.clikt:clikt:_")
 
-    detektPlugins(libs.detekt.formatting)
+    detektPlugins("dev.detekt:detekt-rules-ktlint-wrapper:_")
 
-    testImplementation(libs.kotlin.test.junit5)
-    testImplementation(libs.junit.jupiter.api)
-    testImplementation(libs.junit.jupiter.params)
-    testImplementation(libs.ktor.server.test.host)
-    testImplementation(libs.ktor.client.content.negotiation)
-    testRuntimeOnly(libs.junit.jupiter.engine)
-    testRuntimeOnly(libs.junit.platform.launcher)
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:_")
+    testImplementation("org.junit.jupiter:junit-jupiter-api:_")
+    testImplementation("org.junit.jupiter:junit-jupiter-params:_")
+    testImplementation("io.ktor:ktor-server-test-host")
+    testImplementation("io.ktor:ktor-client-content-negotiation")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:_")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:_")
 }
 
 tasks.named<Test>("test") {
