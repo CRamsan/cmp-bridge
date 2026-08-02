@@ -84,8 +84,12 @@ process directly (`DesktopAppProcess`) or invoke `java` themselves.
   Multi-character text entry goes through the system clipboard + Ctrl+V rather than
   simulated keystrokes, since per-character key simulation doesn't reliably handle
   unicode/locale-specific input.
-- **Screenshots** are taken via `Component.paint` into an off-screen image, not
-  `Robot.createScreenCapture`, for the same headless/CI reason.
+- **Screenshots** are taken via `SkiaLayer.screenshot()` — Compose Desktop renders through Skia
+  directly, bypassing the standard AWT/Swing paint chain entirely, so `Component.paint()` into an
+  off-screen image only ever captures a blank background. `Robot.createScreenCapture` was also
+  rejected: it reads real screen pixels, which needs an actual mapped, unoccluded window and X11
+  permission to capture it — fragile in exactly the kind of sandboxed/CI environment this bridge
+  needs to work in.
 
 `DesktopBridgeServer` accepts one connection per client and speaks the
 `BridgeCommand`/`BridgeResponse` line protocol described above. `DesktopBridgeDriver`

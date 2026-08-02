@@ -15,6 +15,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
+import org.jetbrains.skiko.SkiaLayer
 import java.awt.Component
 import java.awt.Container
 import java.awt.Toolkit
@@ -24,15 +27,12 @@ import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
-import java.awt.image.BufferedImage
 import java.io.BufferedReader
-import java.io.ByteArrayOutputStream
 import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.Base64
-import javax.imageio.ImageIO
 import javax.swing.SwingUtilities
 
 /**
@@ -373,18 +373,34 @@ object DesktopBridgeServer {
     }
 
     /**
-     * Captures the window's current frame as a base64-encoded PNG via [Component.paint] into an
-     * off-screen image — not `Robot.createScreenCapture`, which fails in headless/sandboxed
-     * environments.
+     * The [SkiaLayer] embedded somewhere in [window]'s component tree — Compose Desktop renders
+     * through it directly (Skia manages its own GPU/software surface), bypassing the standard
+     * AWT/Swing paint chain entirely. That's why neither `Component.paint()` into an off-screen
+     * `BufferedImage` nor `Robot.createScreenCapture` reliably captures real content: the former
+     * only ever sees whatever a plain Swing repaint would draw (Skia's content never reaches that
+     * `Graphics2D`), and the latter reads real screen pixels, which requires an actual mapped,
+     * unoccluded window and X11 permission to capture it — fragile exactly in the kind of
+     * sandboxed/CI environment this bridge needs to work in.
+     */
+    private fun skiaLayer(window: Window): SkiaLayer {
+        fun find(component: Component): SkiaLayer? = when {
+            component is SkiaLayer -> component
+            component is Container -> component.components.firstNotNullOfOrNull { find(it) }
+            else -> null
+        }
+        return find(window) ?: error("No SkiaLayer found in the window's component tree")
+    }
+
+    /**
+     * Captures the window's current frame as a base64-encoded PNG via [SkiaLayer.screenshot] —
+     * Skia's own in-process capture of what it actually rendered, not a re-derivation through AWT.
      */
     private fun captureScreenshot(window: Window): String {
-        val image = BufferedImage(window.width, window.height, BufferedImage.TYPE_INT_ARGB)
-        val graphics = image.createGraphics()
-        window.paint(graphics)
-        graphics.dispose()
-        val output = ByteArrayOutputStream()
-        ImageIO.write(image, "png", output)
-        return Base64.getEncoder().encodeToString(output.toByteArray())
+        val bitmap = skiaLayer(window).screenshot() ?: error("SkiaLayer.screenshot() returned no bitmap")
+        val data =
+            Image.makeFromBitmap(bitmap).encodeToData(EncodedImageFormat.PNG)
+                ?: error("Failed to encode screenshot to PNG")
+        return Base64.getEncoder().encodeToString(data.bytes)
     }
 
     /**
