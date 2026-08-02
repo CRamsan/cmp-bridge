@@ -37,6 +37,13 @@ strongest signal that a change to the protocol, the desktop server, or either dr
 still works end to end — run it explicitly (`./gradlew :cmp-bridge-sample:jvmTest`)
 after touching anything in `cmp-bridge` or `cmp-bridge-driver`.
 
+The desktop half of that test opens a real `ComposeWindow` via AWT — it needs an actual
+X server. That's a given on a normal desktop dev machine, but GitHub's `ubuntu-latest`
+runners have none by default, so both `build.yml` and `release.yml` install and run
+under `Xvfb` (a virtual framebuffer X server) specifically so this test can pass in CI.
+If you're setting up a headless Linux dev box or a different CI provider, you'll need
+the same (`apt-get install xvfb`, then run Gradle under `xvfb-run --auto-servernum`).
+
 CI (`.github/workflows/build.yml`) runs `./gradlew build` on every push to `main` and
 every PR — that single command is the bar a PR needs to clear.
 
