@@ -6,12 +6,6 @@ plugins {
     id("dev.detekt")
 }
 
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of((findProperty("jdkVersion") as String).toInt()))
-    }
-}
-
 application {
     mainClass.set("com.cramsan.cmpbridge.httpserver.MainKt")
 }
@@ -45,13 +39,6 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:_")
 }
 
-tasks.named<Test>("test") {
-    useJUnitPlatform()
-    testLogging {
-        events("passed", "skipped", "failed")
-    }
-}
-
 tasks.named<Jar>("jar") {
     archiveBaseName.set("cmp-bridge-http-server")
 }
@@ -60,10 +47,4 @@ ktor {
     fatJar {
         archiveFileName.set("cmp-bridge-http-server-all.jar")
     }
-}
-
-// :cmp-bridge-driver pulls in Compose Desktop, which resolves a couple of jars to the same file
-// name — harmless for the fat jar, but distTar/distZip need an explicit duplicates policy.
-tasks.withType<AbstractCopyTask>().configureEach {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

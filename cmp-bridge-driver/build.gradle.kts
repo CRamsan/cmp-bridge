@@ -7,12 +7,6 @@ plugins {
 
 description = "BridgeDriver client for driving a running Compose Multiplatform app's UI bridge directly."
 
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of((findProperty("jdkVersion") as String).toInt()))
-    }
-}
-
 detekt {
     buildUponDefaultConfig = true
     config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
@@ -32,13 +26,6 @@ dependencies {
     testImplementation("io.mockk:mockk:_")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:_")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:_")
-}
-
-tasks.named<Test>("test") {
-    useJUnitPlatform()
-    testLogging {
-        events("passed", "skipped", "failed")
-    }
 }
 
 // Maven Central publishing — see RELEASING.md. Duplicated verbatim across every published module

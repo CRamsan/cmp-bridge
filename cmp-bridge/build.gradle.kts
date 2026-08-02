@@ -24,8 +24,6 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain((findProperty("jdkVersion") as String).toInt())
-
     android {
         namespace = "com.cramsan.cmpbridge"
         compileSdk = (findProperty("compileSdkVersion") as String).toInt()
@@ -61,13 +59,6 @@ kotlin {
             runtimeOnly("org.junit.jupiter:junit-jupiter-engine:_")
             runtimeOnly("org.junit.platform:junit-platform-launcher:_")
         }
-    }
-}
-
-tasks.named<Test>("jvmTest") {
-    useJUnitPlatform()
-    testLogging {
-        events("passed", "skipped", "failed")
     }
 }
 

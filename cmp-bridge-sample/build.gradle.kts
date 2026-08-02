@@ -19,8 +19,6 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain((findProperty("jdkVersion") as String).toInt())
-
     jvm()
 
     wasmJs {
@@ -63,12 +61,8 @@ compose.desktop {
 }
 
 tasks.named<Test>("jvmTest") {
-    useJUnitPlatform()
     // WasmDevServerProcess.launch shells out to this repo's own gradlew and needs its location.
     systemProperty("e2e.repoRoot", rootProject.projectDir.absolutePath)
-    testLogging {
-        events("passed", "skipped", "failed")
-    }
 }
 
 // See the equivalent comment in cmp-bridge/build.gradle.kts.

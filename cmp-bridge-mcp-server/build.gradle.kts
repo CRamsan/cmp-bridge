@@ -6,12 +6,6 @@ plugins {
     id("com.gradleup.shadow")
 }
 
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of((findProperty("jdkVersion") as String).toInt()))
-    }
-}
-
 application {
     mainClass.set("com.cramsan.cmpbridge.mcpserver.MainKt")
 }
@@ -37,13 +31,6 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:_")
 }
 
-tasks.named<Test>("test") {
-    useJUnitPlatform()
-    testLogging {
-        events("passed", "skipped", "failed")
-    }
-}
-
 tasks.named<Jar>("jar") {
     archiveBaseName.set("cmp-bridge-mcp-server")
 }
@@ -54,9 +41,4 @@ tasks.named<Jar>("jar") {
 // Jar-task property (ShadowJar extends Jar), so no Shadow-specific import is needed here.
 tasks.named<Jar>("shadowJar") {
     archiveFileName.set("cmp-bridge-mcp-server-all.jar")
-}
-
-// Same duplicate-jar cause as cmp-bridge-http-server/build.gradle.kts.
-tasks.withType<AbstractCopyTask>().configureEach {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
