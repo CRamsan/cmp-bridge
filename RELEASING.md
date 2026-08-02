@@ -1,17 +1,26 @@
 # Releasing
 
-Maintainer-only notes for releasing cmp-bridge. A single `vX.Y.Z` tag push drives two independent
-GitHub Actions workflows:
+Maintainer-only notes for releasing cmp-bridge. A single `vX.Y.Z` tag push drives
+`.github/workflows/release.yml`'s single `release` job, which runs in strict order — build and
+test once, then reuse that build for both distribution channels:
 
-- **`.github/workflows/publish.yml`** publishes `cmp-bridge` and `cmp-bridge-driver` to Maven
-  Central — the only two modules meant to be depended on as libraries (see the
-  `mavenPublishing { ... }` block duplicated across each one's `build.gradle.kts`).
-- **`.github/workflows/release.yml`** builds `cmp-bridge-http-server` and `cmp-bridge-mcp-server`
-  as runnable fat jars and attaches them to a GitHub Release. These two are CLI applications, not
-  libraries — nobody adds a CLI tool as a Gradle dependency — so they're distributed as standalone
-  downloads instead of Maven artifacts. See "GitHub Release: the CLI tools" below.
+1. **Build and test** every module once (`./gradlew build`) — the same bar as `build.yml`.
+2. **Build CLI fat jars** for `cmp-bridge-http-server`/`cmp-bridge-mcp-server` from that same
+   build (`shadowJar`, no recompilation).
+3. **Create the GitHub Release**, attaching those fat jars. These two are CLI applications, not
+   libraries — nobody adds a CLI tool as a Gradle dependency — so they're distributed as standalone
+   downloads instead of Maven artifacts. See "GitHub Release: the CLI tools" below.
+4. **Publish to Maven Central**: `cmp-bridge` and `cmp-bridge-driver`, the only two modules meant
+   to be depended on as libraries (see the `mavenPublishing { ... }` block duplicated across each
+   one's `build.gradle.kts`).
 
-`cmp-bridge-sample` is never released by either workflow.
+Doing this as one sequential job (rather than parallel jobs) avoids compiling the shared modules
+twice on separate runners. The trade-off: the whole job — including the build/test/GitHub-Release
+steps, not just the Maven publish step — sits behind `environment: release`'s protection rules
+(see step 8 below), since environment gating applies at the job level. If a step fails partway
+through, re-running the job re-runs everything from the start, including the build.
+
+`cmp-bridge-sample` is never released.
 
 If you're looking for how to *consume* cmp-bridge, see [README.md](README.md).
 
@@ -41,7 +50,7 @@ Maven Central publishing targets Sonatype's **Central Publisher Portal** (`centr
    Delete `private-key.asc` once it's pasted into the secret below — don't leave it on disk.
 8. In `CRamsan/cmp-bridge` → Settings → Environments, create (or reuse) an environment named
    `release`, then add these as *environment* secrets on it (not repo-level Actions secrets — the
-   `publish` job in `publish.yml` targets `environment: release`, so secrets added anywhere else
+   `release` job in `release.yml` targets `environment: release`, so secrets added anywhere else
    won't be visible to it):
    - `MAVEN_CENTRAL_USERNAME` — the token username from step 4
    - `MAVEN_CENTRAL_PASSWORD` — the token password from step 4
@@ -56,21 +65,21 @@ Maven Central publishing targets Sonatype's **Central Publisher Portal** (`centr
 
 1. In `gradle.properties`, bump `VERSION_NAME` to the next release version (drop the `-SNAPSHOT`
    suffix, e.g. `0.1.0-SNAPSHOT` → `0.1.0`). Commit this.
-2. Tag the commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`. This triggers both
-   `publish.yml` (Maven Central) and `release.yml` (the CLI jars) independently — either can be
-   re-run on its own via `workflow_dispatch` if only one of them fails.
-3. `publish.yml` runs `./gradlew build publishToMavenCentral` — the same `build` bar as CI, then an
-   upload per published module. Once it finishes, log into Central Portal and manually click
-   "Publish" on each of the 2 pending deployments to actually release them. Every
-   `mavenPublishing { }` block is deliberately left at `publishToMavenCentral()`'s default (leave
-   deployments "pending" rather than `automaticRelease = true`), so this manual step is required
-   for every release — that's intentional, not a bug, so the first upload of a new version can be
-   sanity-checked in the Portal UI before it becomes permanent. If you'd rather releases
-   auto-publish, that's a one-line change (`publishToMavenCentral(automaticRelease = true)`) in
-   each module's `mavenPublishing { }` block, once you trust the pipeline enough to skip the manual
-   check.
-4. `release.yml` builds and tests `cmp-bridge-http-server`/`cmp-bridge-mcp-server`, builds their
-   fat jars, and attaches them to a GitHub Release for the pushed tag — no manual step needed here.
+2. Tag the commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`. This triggers
+   `release.yml`'s `release` job, which runs build → test → GitHub Release → Maven Central publish
+   in order, in a single run.
+3. The job builds and tests every module once, builds the CLI fat jars from that build, and
+   attaches them to a GitHub Release for the pushed tag — no manual step needed for this part.
+4. It then runs `publishToMavenCentral` for `cmp-bridge`/`cmp-bridge-driver` — an upload per
+   published module, reusing the same build (no recompilation). Once it finishes, log into Central
+   Portal and manually click "Publish" on each of the 2 pending deployments to actually release
+   them. Every `mavenPublishing { }` block is deliberately left at `publishToMavenCentral()`'s
+   default (leave deployments "pending" rather than `automaticRelease = true`), so this manual step
+   is required for every release — that's intentional, not a bug, so the first upload of a new
+   version can be sanity-checked in the Portal UI before it becomes permanent. If you'd rather
+   releases auto-publish, that's a one-line change (`publishToMavenCentral(automaticRelease =
+   true)`) in each module's `mavenPublishing { }` block, once you trust the pipeline enough to skip
+   the manual check.
 5. Bump `VERSION_NAME` again to the next `-SNAPSHOT` (e.g. `0.1.0` → `0.1.1-SNAPSHOT`) in a
    follow-up commit, so local `publishToMavenLocal` builds and any in-progress work don't
    accidentally resolve as the just-released version.

@@ -11,6 +11,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
@@ -20,20 +21,42 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # No Android SDK setup needed here (unlike build.yml/publish.yml): building just these two
-      # modules never touches cmp-bridge's Android target, only its jvm target — confirmed via
-      # `./gradlew :cmp-bridge-http-server:build :cmp-bridge-mcp-server:build --dry-run`.
-      - name: Build and test the CLI modules, then build their fat jars
-        run: >
-          ./gradlew :cmp-bridge-http-server:build :cmp-bridge-mcp-server:build
-          :cmp-bridge-http-server:shadowJar :cmp-bridge-mcp-server:shadowJar --console=plain
+      - name: Derive release version from tag
+        run: echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
-      - name: Attach fat jars to the GitHub Release
+      # Compiles and tests every module once (same bar as build.yml) so the GitHub Release and the
+      # Maven Central publish below both reuse this build instead of each job recompiling from
+      # scratch. -PVERSION_NAME is passed here too (not just on the publish step) so the project
+      # version is consistent across every Gradle invocation in this job — otherwise a version
+      # change between steps would invalidate up-to-date checks and force partial rebuilds.
+      - name: Build and test
+        run: ./gradlew build -PVERSION_NAME=$VERSION_NAME --console=plain
+
+      - name: Build CLI fat jars
+        run: >
+          ./gradlew :cmp-bridge-http-server:shadowJar :cmp-bridge-mcp-server:shadowJar
+          -PVERSION_NAME=$VERSION_NAME --console=plain
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             cmp-bridge-http-server/build/libs/cmp-bridge-http-server-all.jar
             cmp-bridge-mcp-server/build/libs/cmp-bridge-mcp-server-all.jar
+
+      # Every module's deployment lands "pending" in the Central Portal (see gradle/publishing
+      # config) — a human still clicks "Publish" per deployment there. See RELEASING.md for the
+      # release recipe and the one-time account/secrets setup this depends on.
+      - name: Publish to Maven Central
+        run: ./gradlew publishToMavenCentral --no-configuration-cache -PVERSION_NAME=$VERSION_NAME --console=plain
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_SIGNING_PASSWORD }}
