@@ -39,7 +39,10 @@ Maven Central publishing targets Sonatype's **Central Publisher Portal** (`centr
    gpg --export-secret-keys --armor <KEY_ID> > private-key.asc
    ```
    Delete `private-key.asc` once it's pasted into the secret below — don't leave it on disk.
-8. In `CRamsan/cmp-bridge` → Settings → Secrets and variables → Actions, add:
+8. In `CRamsan/cmp-bridge` → Settings → Environments, create (or reuse) an environment named
+   `release`, then add these as *environment* secrets on it (not repo-level Actions secrets — the
+   `publish` job in `publish.yml` targets `environment: release`, so secrets added anywhere else
+   won't be visible to it):
    - `MAVEN_CENTRAL_USERNAME` — the token username from step 4
    - `MAVEN_CENTRAL_PASSWORD` — the token password from step 4
    - `GPG_SIGNING_KEY` — the full contents of `private-key.asc` from step 7
