@@ -81,7 +81,7 @@ class DesktopBridgeDriver private constructor(private val host: String, private 
             }
             error(
                 "Could not connect to a UI test bridge at $host:$port within ${CONNECT_TIMEOUT_MS}ms — " +
-                    "is the app running with -PcmpBridge (or -DcmpBridge.enabled=true)?",
+                    "is the app running with CMP_BRIDGE_ENABLED=true (or -DcmpBridge.enabled=true)?",
             )
         }
     }

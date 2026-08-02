@@ -63,8 +63,15 @@ try to paper over that at the transport level — it only unifies the *result*
 
 `DesktopBridgeServer` (in `cmp-bridge`, jvmMain-only) is object code linked into the
 app itself. `startIfEnabled(window, scope)` is a no-op unless the app was launched with
-`-DcmpBridge.enabled=true` — it must be opt-in, since the mechanisms it uses would be a
-liability in a shipped build:
+`CMP_BRIDGE_ENABLED=true` or `-DcmpBridge.enabled=true` — it must be opt-in, since the
+mechanisms it uses would be a liability in a shipped build. Both an env var and a system
+property are supported deliberately: a `-D` flag isn't inherited by a forked child
+process on any launcher (Gradle's `JavaExec`, an IDE run configuration, ...) unless that
+launcher explicitly forwards it, while an env var is, by default, virtually everywhere —
+so the env var is what actually works out of the box through something like
+`./gradlew :app:run` for any app embedding this library, with no Gradle changes needed
+on that app's end. The system property stays supported for callers that construct the
+process directly (`DesktopAppProcess`) or invoke `java` themselves.
 
 - **Reads** come from `ComposeWindow.semanticsOwners` — the real semantics tree,
   queried fresh on every request, never cached.
@@ -190,8 +197,8 @@ capability differences to poll/branch around, not as bugs in the caller's own te
 ## Design invariants worth preserving
 
 - **Debug/test only, always opt-in.** `DesktopBridgeServer` never starts unless
-  `-DcmpBridge.enabled=true` is set explicitly; there is no way for it to activate in a
-  normal run of a consuming app.
+  `CMP_BRIDGE_ENABLED=true` or `-DcmpBridge.enabled=true` is set explicitly; there is no
+  way for it to activate in a normal run of a consuming app.
 - **Real tree, real input, never a platform input-injection API.** Reads always come
   from the platform's own live semantics/accessibility tree (never cached, never
   reconstructed from a snapshot); writes always go through real input events on the

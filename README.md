@@ -100,8 +100,12 @@ fun main() = application {
 }
 ```
 
-`startIfEnabled` is a no-op unless the process is launched with
-`-DcmpBridge.enabled=true`, so this is safe to leave in a normal build.
+`startIfEnabled` is a no-op unless the process is launched with `CMP_BRIDGE_ENABLED=true`
+(or `-DcmpBridge.enabled=true`), so this is safe to leave in a normal build. Prefer the
+env var when launching through something that forks a JVM — `./gradlew :app:run`, an
+IDE run configuration, etc. — since environment variables are inherited by a child
+process by default everywhere, unlike `-D` system properties, which aren't forwarded
+into a forked process unless whatever launched it explicitly does so.
 
 **2. Tag the elements you want to drive or read**, the same way you would for any
 accessibility-based test tool:
@@ -133,7 +137,7 @@ code:
 **Desktop**
 
 ```bash
-./gradlew :cmp-bridge-sample:run -DcmpBridge.enabled=true
+CMP_BRIDGE_ENABLED=true ./gradlew :cmp-bridge-sample:run
 ```
 
 This opens the sample app with the bridge listening on `127.0.0.1:8901`. In another

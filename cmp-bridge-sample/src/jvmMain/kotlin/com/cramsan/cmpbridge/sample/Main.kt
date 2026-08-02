@@ -7,7 +7,7 @@ import com.cramsan.cmpbridge.DesktopBridgeServer
 
 /**
  * Desktop entry point. Arms [DesktopBridgeServer] against the app's real `ComposeWindow` — a
- * no-op unless launched with `-DcmpBridge.enabled=true`.
+ * no-op unless launched with `CMP_BRIDGE_ENABLED=true` (or `-DcmpBridge.enabled=true`).
  */
 fun main() = application {
     Window(onCloseRequest = ::exitApplication, title = "cmp-bridge sample") {

@@ -38,7 +38,8 @@ import javax.swing.SwingUtilities
 /**
  * Debug-only local bridge server for JVM desktop. Drives the app via its real semantics tree
  * (`ComposeWindow.semanticsOwners`) for reads and synthetic AWT input events posted onto the app's
- * own event queue — never `java.awt.Robot`. Never started unless [ENABLED_PROPERTY] is set.
+ * own event queue — never `java.awt.Robot`. Never started unless enabled via [ENABLED_PROPERTY] or
+ * [ENABLED_ENV_VAR].
  *
  * Speaks the [BridgeCommand]/[BridgeResponse] protocol: one JSON-encoded command per line in, one
  * JSON-encoded response per line out.
@@ -48,6 +49,18 @@ import javax.swing.SwingUtilities
 object DesktopBridgeServer {
     const val ENABLED_PROPERTY = "cmpBridge.enabled"
     const val PORT_PROPERTY = "cmpBridge.port"
+
+    // JVM system properties (-D) aren't inherited by a forked child process on any launcher —
+    // Gradle's JavaExec, an IDE run configuration, a shell script — unless that launcher explicitly
+    // forwards them, which none do by default. Environment variables are, by default, everywhere
+    // (Gradle's JavaExec.environment defaults to the launching process's own env; so does a plain
+    // shell fork). The env var is the mechanism that works out of the box through `./gradlew :run`
+    // for any consuming app, without that app needing any Gradle changes of its own; the system
+    // property stays supported for callers that construct the process directly (e.g.
+    // DesktopAppProcess) or invoke `java` themselves.
+    const val ENABLED_ENV_VAR = "CMP_BRIDGE_ENABLED"
+    const val PORT_ENV_VAR = "CMP_BRIDGE_PORT"
+
     private const val DEFAULT_PORT = 8901
     private val protocolJson = Json { ignoreUnknownKeys = true }
 
@@ -70,13 +83,17 @@ object DesktopBridgeServer {
         )
 
     /**
-     * Starts the bridge server on [scope] if [ENABLED_PROPERTY] is set to `"true"`; otherwise a
-     * no-op. Must be called with the app's root [Window] so click/type coordinates can be
-     * resolved to the actual Compose input target inside it.
+     * Starts the bridge server on [scope] if enabled via [ENABLED_PROPERTY] or [ENABLED_ENV_VAR]
+     * (either set to `"true"`); otherwise a no-op. Must be called with the app's root [Window] so
+     * click/type coordinates can be resolved to the actual Compose input target inside it.
      */
     fun startIfEnabled(window: Window, scope: CoroutineScope) {
-        if (System.getProperty(ENABLED_PROPERTY) != "true") return
-        val port = System.getProperty(PORT_PROPERTY)?.toIntOrNull() ?: DEFAULT_PORT
+        val enabled = System.getProperty(ENABLED_PROPERTY) == "true" || System.getenv(ENABLED_ENV_VAR) == "true"
+        if (!enabled) return
+        val port =
+            System.getProperty(PORT_PROPERTY)?.toIntOrNull()
+                ?: System.getenv(PORT_ENV_VAR)?.toIntOrNull()
+                ?: DEFAULT_PORT
         scope.launch(Dispatchers.IO) {
             ServerSocket(port).use { serverSocket ->
                 while (true) {
