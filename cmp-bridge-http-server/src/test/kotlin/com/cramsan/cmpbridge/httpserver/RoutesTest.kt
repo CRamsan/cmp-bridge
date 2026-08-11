@@ -51,6 +51,27 @@ private val TAGGED_NODE =
         ),
     )
 
+/** Bounds have settled (non-zero) but text is still null — the case waitForText guards against. */
+private val SILENT_NODE =
+    ROOT_NODE.copy(
+        children =
+        listOf(
+            HierarchyNode(
+                testTag = "silent_tag",
+                role = null,
+                text = null,
+                contentDescription = null,
+                x = 0f,
+                y = 0f,
+                width = 10f,
+                height = 10f,
+                enabled = true,
+                actions = emptySet(),
+                children = emptyList(),
+            ),
+        ),
+    )
+
 private class FakeBridgeDriver : BridgeDriver {
     var lastClickTag: String? = null
     var lastSetText: Pair<String, String>? = null
@@ -202,6 +223,54 @@ class RoutesTest {
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertTrue(response.bodyAsText().contains("did not appear"))
+    }
+
+    @Test
+    fun `POST bridge with waitForText returns the node once its text is settled`() = testApplication {
+        val driver = FakeBridgeDriver().apply { tree = TAGGED_NODE }
+        application { bridgeHttpModule(driver) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"operation":"waitForText","payload":{"tag":"my_tag","timeoutMs":1000}}""")
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(response.bodyAsText().contains("\"text\":\"hello\""))
+    }
+
+    @Test
+    fun `POST bridge with waitForText on a tag whose text stays null returns 400 after the timeout`() =
+        testApplication {
+            val driver = FakeBridgeDriver().apply { tree = SILENT_NODE }
+            application { bridgeHttpModule(driver) }
+            val client = createClient { install(ContentNegotiation) { json() } }
+
+            val response =
+                client.post("/bridge") {
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"operation":"waitForText","payload":{"tag":"silent_tag","timeoutMs":200}}""")
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            assertTrue(response.bodyAsText().contains("never settled"))
+        }
+
+    @Test
+    fun `POST bridge with waitForText on a tag that never appears returns 400 after the timeout`() = testApplication {
+        application { bridgeHttpModule(FakeBridgeDriver()) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"operation":"waitForText","payload":{"tag":"missing","timeoutMs":200}}""")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertTrue(response.bodyAsText().contains("never settled"))
     }
 
     @Test

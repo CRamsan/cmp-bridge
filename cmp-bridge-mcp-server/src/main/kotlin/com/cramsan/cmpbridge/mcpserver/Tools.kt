@@ -1,3 +1,7 @@
+// One function per registered tool is the natural shape of this file — it grows by exactly one
+// function every time a BridgeDriver operation gets exposed as a tool, not from disorganization.
+@file:Suppress("TooManyFunctions")
+
 package com.cramsan.cmpbridge.mcpserver
 
 import com.cramsan.cmpbridge.driver.BridgeDriver
@@ -18,7 +22,10 @@ import java.util.Base64
 
 private val json = Json { ignoreUnknownKeys = true }
 
-/** Registers one MCP tool per [BridgeDriver] core operation, plus [BridgeDriver.waitForTag], on [server]. */
+/**
+ * Registers one MCP tool per [BridgeDriver] core operation, plus [BridgeDriver.waitForTag] and
+ * [BridgeDriver.waitForText], on [server].
+ */
 fun Server.registerBridgeTools(driver: BridgeDriver) {
     registerGetHierarchyTool(driver)
     registerClickTool(driver)
@@ -26,6 +33,7 @@ fun Server.registerBridgeTools(driver: BridgeDriver) {
     registerScrollTool(driver)
     registerScreenshotTool(driver)
     registerWaitForTagTool(driver)
+    registerWaitForTextTool(driver)
 }
 
 private fun Server.registerGetHierarchyTool(driver: BridgeDriver) {
@@ -116,27 +124,7 @@ private fun Server.registerWaitForTagTool(driver: BridgeDriver) {
         "Polls the app's UI tree until the element with the given test tag appears (or errors " +
             "on timeout), instead of repeatedly calling get_hierarchy yourself while waiting for " +
             "something to show up.",
-        inputSchema =
-        ToolSchema(
-            properties =
-            buildJsonObject {
-                put(
-                    "tag",
-                    buildJsonObject {
-                        put("type", "string")
-                        put("description", "The element's test tag")
-                    },
-                )
-                put(
-                    "timeoutMs",
-                    buildJsonObject {
-                        put("type", "integer")
-                        put("description", "Max time to wait, in milliseconds (default 15000)")
-                    },
-                )
-            },
-            required = listOf("tag"),
-        ),
+        inputSchema = tagAndTimeoutSchema(),
     ) { request ->
         safeCall {
             val tag = request.arguments.stringArg("tag")
@@ -146,6 +134,49 @@ private fun Server.registerWaitForTagTool(driver: BridgeDriver) {
         }
     }
 }
+
+private fun Server.registerWaitForTextTool(driver: BridgeDriver) {
+    addTool(
+        name = "wait_for_text",
+        description =
+        "Polls the app's UI tree until the element with the given test tag has settled, " +
+            "non-null text (or errors on timeout) — guards against reading a freshly-appeared " +
+            "node's still-settling text, unlike a raw get_hierarchy call.",
+        inputSchema = tagAndTimeoutSchema(),
+    ) { request ->
+        safeCall {
+            val tag = request.arguments.stringArg("tag")
+            val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
+            val node = if (timeoutMs != null) driver.waitForText(tag, timeoutMs) else driver.waitForText(tag)
+            CallToolResult(content = listOf(TextContent(text = json.encodeToString(node))))
+        }
+    }
+}
+
+/**
+ * Shared input schema for [registerWaitForTagTool] and [registerWaitForTextTool]: a required
+ * `tag` plus optional `timeoutMs`.
+ */
+private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
+    properties =
+    buildJsonObject {
+        put(
+            "tag",
+            buildJsonObject {
+                put("type", "string")
+                put("description", "The element's test tag")
+            },
+        )
+        put(
+            "timeoutMs",
+            buildJsonObject {
+                put("type", "integer")
+                put("description", "Max time to wait, in milliseconds (default 15000)")
+            },
+        )
+    },
+    required = listOf("tag"),
+)
 
 private fun stringPropertiesSchema(vararg properties: Pair<String, String>): ToolSchema = ToolSchema(
     properties =

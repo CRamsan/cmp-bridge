@@ -151,9 +151,9 @@ disposable instance per test run — the same `BridgeDriver` implementations ser
 Clikt CLI takes `--platform desktop|web` plus connection args (`--host`/`--port` for
 desktop, `--url` for web — see `BridgeExplorerOptions`, intentionally duplicated in
 both modules rather than shared through a third one), connects a `BridgeDriver`, and
-adapts its five core operations, plus the `waitForTag` convenience helper, to a
-different transport. Neither ever launches an app — both assume one is already running
-with the bridge armed (or a wasmJs dev server is already up).
+adapts its five core operations, plus the `waitForTag`/`waitForText` convenience
+helpers, to a different transport. Neither ever launches an app — both assume one is
+already running with the bridge armed (or a wasmJs dev server is already up).
 
 - **`cmp-bridge-http-server`**: Ktor + Netty, a single `POST /bridge` endpoint. The
   request body is an envelope, `{"operation": "...", "payload": {...}}`, dispatched in
@@ -164,12 +164,12 @@ with the bridge armed (or a wasmJs dev server is already up).
   `StatusPages` handler, not a generic `500`.
 - **`cmp-bridge-mcp-server`**: MCP over stdio (`kotlin-sdk`), one tool per driver
   operation (`get_hierarchy`, `click`, `set_text`, `scroll`, `screenshot`,
-  `wait_for_tag`), registered in `Tools.kt`. Because the MCP JSON-RPC stream *is* stdout,
-  `main` captures the real `System.out` before anything else runs and redirects
-  `System.out` to stderr for the rest of the process — any stray print from a dependency
-  lands somewhere harmless instead of corrupting the wire protocol. Driver failures are
-  caught per-tool-call (`safeCall`) and turned into an MCP tool-level error rather than
-  crashing the session.
+  `wait_for_tag`, `wait_for_text`), registered in `Tools.kt`. Because the MCP JSON-RPC
+  stream *is* stdout, `main` captures the real `System.out` before anything else runs
+  and redirects `System.out` to stderr for the rest of the process — any stray print
+  from a dependency lands somewhere harmless instead of corrupting the wire protocol.
+  Driver failures are caught per-tool-call (`safeCall`) and turned into an MCP
+  tool-level error rather than crashing the session.
 
 ## `cmp-bridge-sample`: the real fixture
 
