@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
  * Drives the [App] sample screen through [BridgeDriver] on both platforms — desktop over the
  * socket bridge, web over Compose Multiplatform's accessibility DOM.
  *
- * Desktop exercises all five `BridgeDriver` operations end to end. Web exercises three of five —
+ * Desktop exercises all five `BridgeDriver` operations end to end. Web exercises four of five —
  * see the web test's own comment for why.
  */
 class DemoScenarioTest {
@@ -75,12 +75,25 @@ class DemoScenarioTest {
 
             // Not exercised on web: click()/setText() on "name_field", which permanently reports
             // zero bounds in the accessibility DOM (its text still reads correctly via
-            // getHierarchy()), and scroll() — see WebBridgeDriver.scroll()'s doc comment.
+            // getHierarchy()).
             //
             // What *is* verified: getHierarchy() still reflects a zero-bounds node's live text,
-            // click() works, and screenshot() produces a real PNG.
+            // click() works, scroll() works, and screenshot() produces a real PNG.
             val greeting = d.getHierarchy().find("greeting_text")
             assertEquals("Hello, stranger!", greeting?.text)
+
+            // deltaY isn't equivalent across platforms (BridgeDriver.scroll's own doc): web's
+            // wheel delta is pixel-based, unlike desktop's AWT scroll units, so it needs a much
+            // larger per-call value to cover the same list within MAX_SCROLL_ATTEMPTS.
+            val targetTag = "item_${ITEM_COUNT - 1}"
+            var found = d.getBounds(targetTag)
+            var attempts = 0
+            while (found == null && attempts < MAX_SCROLL_ATTEMPTS) {
+                d.scroll("item_list", WEB_SCROLL_DELTA)
+                found = d.getBounds(targetTag)
+                attempts++
+            }
+            assertTrue(found != null, "Scrolled $attempts times but \"$targetTag\" never appeared")
 
             assertValidPng(d.screenshot())
         }
@@ -124,6 +137,7 @@ class DemoScenarioTest {
     private companion object {
         const val MAX_SCROLL_ATTEMPTS = 60
         const val SCROLL_DELTA = 5
+        const val WEB_SCROLL_DELTA = 300
         const val MAX_CLICK_ATTEMPTS = 5
         const val CLICK_SETTLE_TIMEOUT_MS = 3_000L
         const val TEXT_POLL_INTERVAL_MS = 100L

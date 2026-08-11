@@ -77,10 +77,6 @@ class WebBridgeDriver private constructor(
         page.keyboard().type(text)
     }
 
-    /**
-     * Known issue: unreliable in some sandboxed headless Chromium builds — see
-     * https://github.com/CRamsan/cmp-bridge/issues/1.
-     */
     override fun scroll(anchorTag: String, deltaY: Int) {
         val node = getBounds(anchorTag) ?: error("Cannot scroll at unknown tag \"$anchorTag\"")
         val x = node.x + node.width / 2.0

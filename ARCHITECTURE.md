@@ -187,8 +187,6 @@ wires the bridge in (`Main.kt` on both platforms) and drives it from a test.
 The web path's `HierarchyNode`s are a best-effort subset of desktop's, and a couple of
 gaps are tracked rather than silently swallowed:
 
-- `WebBridgeDriver.scroll` is unreliable in some sandboxed headless Chromium builds
-  (tracked as a known issue in the driver's own doc comment).
 - Password fields aren't masked in the web accessibility walk the way
   `DesktopBridgeServer` masks them (also tracked there).
 - A `BasicTextField`'s bounds can permanently read as zero in the web accessibility DOM
