@@ -120,8 +120,8 @@ from ARIA role, and a couple of known gaps are called out where they bite (see
 ### `BridgeDriver`: the common interface
 
 `BridgeDriver` (`cmp-bridge-driver/BridgeDriver.kt`) is the seam everything above the
-transport layer is written against: `getHierarchy`, `getBounds`/`waitForTag` (default
-methods built on `getHierarchy`), `click`, `setText`, `scroll`, `screenshot`, and
+transport layer is written against: `getHierarchy`, `getBounds`/`waitForTag`/`waitForText`
+(default methods built on `getHierarchy`), `click`, `setText`, `scroll`, `screenshot`, and
 `close` (`AutoCloseable`). `DesktopBridgeDriver` and `WebBridgeDriver` are its only two
 implementations. Everything downstream — the HTTP server, the MCP server, an app's own
 test code — is written against this interface, not against either platform's transport.

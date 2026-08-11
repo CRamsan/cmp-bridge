@@ -30,7 +30,7 @@ class DemoScenarioTest {
                 throw it
             }
         ManagedBridgeDriver(process, driver).use { d ->
-            assertEquals("Count: 0", d.waitForTag("counter_text").text)
+            assertEquals("Count: 0", d.waitForText("counter_text").text)
 
             // A freshly-launched window's very first click can silently miss — the bridge socket
             // accepts connections slightly before the window is input-ready. Retry the click.
@@ -38,9 +38,9 @@ class DemoScenarioTest {
                 d.clickUntilText("increment_button", "counter_text", "Count: $expected")
             }
 
-            assertEquals("Hello, stranger!", d.waitForTag("greeting_text").text)
+            assertEquals("Hello, stranger!", d.waitForText("greeting_text").text)
             d.setText("name_field", "Ada")
-            assertEquals("Hello, Ada!", d.waitForText("greeting_text", "Hello, Ada!"))
+            assertEquals("Hello, Ada!", d.waitForTextEquals("greeting_text", "Hello, Ada!"))
 
             // Scroll units aren't equivalent across platforms (BridgeDriver.scroll's own doc) —
             // poll for the target row to appear rather than trust a fixed deltaY to land it.
@@ -67,7 +67,7 @@ class DemoScenarioTest {
                 throw it
             }
         ManagedBridgeDriver(process, driver).use { d ->
-            assertEquals("Count: 0", d.waitForTag("counter_text").text)
+            assertEquals("Count: 0", d.waitForText("counter_text").text)
 
             for (expected in 1..3) {
                 d.clickUntilText("increment_button", "counter_text", "Count: $expected")
@@ -104,8 +104,12 @@ class DemoScenarioTest {
         assertEquals(PNG_MAGIC, png.take(PNG_MAGIC.size))
     }
 
-    /** Polls [tag]'s text until it equals [expected], or fails after [timeoutMs]. */
-    private fun BridgeDriver.waitForText(tag: String, expected: String, timeoutMs: Long = 15_000): String {
+    /**
+     * Polls [tag]'s text until it equals [expected], or fails after [timeoutMs]. Distinct from
+     * [BridgeDriver.waitForText]: that one waits for *any* settled (non-null) text, this one
+     * waits for one specific value.
+     */
+    private fun BridgeDriver.waitForTextEquals(tag: String, expected: String, timeoutMs: Long = 15_000): String {
         val deadline = System.currentTimeMillis() + timeoutMs
         var last: String? = null
         while (System.currentTimeMillis() < deadline) {
@@ -126,7 +130,7 @@ class DemoScenarioTest {
         repeat(maxAttempts) { attempt ->
             click(clickTag)
             try {
-                waitForText(readTag, expected, timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
+                waitForTextEquals(readTag, expected, timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
                 return
             } catch (e: IllegalStateException) {
                 if (attempt == maxAttempts - 1) throw e

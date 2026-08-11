@@ -24,6 +24,22 @@ interface BridgeDriver : AutoCloseable {
         error("Tag \"$tag\" did not appear within ${timeoutMs}ms")
     }
 
+    /**
+     * Blocks until [tag]'s bounds have settled (per [getBounds]) and its `text` is non-null, up
+     * to [timeoutMs]. A node can report `null`/stale text on the very first read after it
+     * appears or a screen transition — desktop's semantics tree and web's (debounced
+     * 100–1000ms) accessibility-DOM sync both need a moment to catch up — so callers reading
+     * freshly-appeared text should go through this rather than a raw [getHierarchy] lookup.
+     */
+    fun waitForText(tag: String, timeoutMs: Long = 15_000): HierarchyNode {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            getBounds(tag)?.takeIf { it.text != null }?.let { return it }
+            Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
+        }
+        error("Tag \"$tag\"'s text never settled within ${timeoutMs}ms")
+    }
+
     /** Clicks the node tagged [tag] via a real synthetic input event. */
     fun click(tag: String)
 

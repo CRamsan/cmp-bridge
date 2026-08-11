@@ -121,7 +121,7 @@ val process = DesktopAppProcess.launch("com.example.myapp.desktop.MainKt")
 val driver = DesktopBridgeDriver.connect(process.host, process.port)
 ManagedBridgeDriver(process, driver).use { d ->
     d.click("submit_button")
-    assertEquals("Done", d.waitForTag("status_text").text)
+    assertEquals("Done", d.waitForText("status_text").text)
 }
 ```
 
