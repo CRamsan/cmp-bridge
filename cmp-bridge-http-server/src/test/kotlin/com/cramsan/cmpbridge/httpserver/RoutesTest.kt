@@ -31,13 +31,34 @@ private val ROOT_NODE =
         children = emptyList(),
     )
 
+private val TAGGED_NODE =
+    ROOT_NODE.copy(
+        children =
+        listOf(
+            HierarchyNode(
+                testTag = "my_tag",
+                role = null,
+                text = "hello",
+                contentDescription = null,
+                x = 0f,
+                y = 0f,
+                width = 10f,
+                height = 10f,
+                enabled = true,
+                actions = emptySet(),
+                children = emptyList(),
+            ),
+        ),
+    )
+
 private class FakeBridgeDriver : BridgeDriver {
     var lastClickTag: String? = null
     var lastSetText: Pair<String, String>? = null
     var lastScroll: Pair<String, Int>? = null
     var shouldFailClick = false
+    var tree: HierarchyNode = ROOT_NODE
 
-    override fun getHierarchy(): HierarchyNode = ROOT_NODE
+    override fun getHierarchy(): HierarchyNode = tree
 
     override fun click(tag: String) {
         if (shouldFailClick) error("Unknown tag: $tag")
@@ -150,6 +171,37 @@ class RoutesTest {
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertTrue(response.bodyAsText().contains("Unknown tag"))
+    }
+
+    @Test
+    fun `POST bridge with waitForTag returns the node once it's already present`() = testApplication {
+        val driver = FakeBridgeDriver().apply { tree = TAGGED_NODE }
+        application { bridgeHttpModule(driver) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"operation":"waitForTag","payload":{"tag":"my_tag","timeoutMs":1000}}""")
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(response.bodyAsText().contains("\"testTag\":\"my_tag\""))
+    }
+
+    @Test
+    fun `POST bridge with waitForTag on a tag that never appears returns 400 after the timeout`() = testApplication {
+        application { bridgeHttpModule(FakeBridgeDriver()) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"operation":"waitForTag","payload":{"tag":"missing","timeoutMs":200}}""")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertTrue(response.bodyAsText().contains("did not appear"))
     }
 
     @Test

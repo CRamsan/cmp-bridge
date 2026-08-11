@@ -26,8 +26,9 @@ private data class ErrorResponse(val error: String)
 
 /**
  * Envelope every request to `/bridge` is wrapped in: [operation] selects the [BridgeDriver] call
- * to make (`"getHierarchy"`, `"click"`, `"setText"`, `"scroll"`, or `"screenshot"`), [payload] is
- * decoded into that operation's own argument type. Absent for operations that take none.
+ * to make (`"getHierarchy"`, `"click"`, `"setText"`, `"scroll"`, `"screenshot"`, or
+ * `"waitForTag"`), [payload] is decoded into that operation's own argument type. Absent for
+ * operations that take none.
  */
 @Serializable
 private data class BridgeRequest(val operation: String, val payload: JsonElement = JsonNull)
@@ -41,13 +42,17 @@ private data class SetTextPayload(val tag: String, val text: String)
 @Serializable
 private data class ScrollPayload(val anchorTag: String, val deltaY: Int)
 
+/** [timeoutMs] mirrors [BridgeDriver.waitForTag]'s own default. */
+@Serializable
+private data class WaitForTagPayload(val tag: String, val timeoutMs: Long = 15_000)
+
 private val payloadJson = Json { ignoreUnknownKeys = true }
 
 /**
- * Wires [driver]'s five operations up behind a single endpoint, `POST /bridge`, dispatched on the
- * request body's `operation` field — e.g. `{"operation": "setText", "payload": {"tag": "...",
- * "text": "..."}}`. A thin adapter only: every operation just calls straight into [BridgeDriver],
- * no business logic of its own.
+ * Wires [driver]'s five core operations, plus the [BridgeDriver.waitForTag] convenience helper,
+ * up behind a single endpoint, `POST /bridge`, dispatched on the request body's `operation` field
+ * — e.g. `{"operation": "setText", "payload": {"tag": "...", "text": "..."}}`. A thin adapter
+ * only: every operation just calls straight into [BridgeDriver], no business logic of its own.
  */
 fun Application.bridgeHttpModule(driver: BridgeDriver) {
     install(CallLogging)
@@ -89,6 +94,11 @@ fun Application.bridgeHttpModule(driver: BridgeDriver) {
                 }
 
                 "screenshot" -> call.respondBytes(driver.screenshot(), ContentType.Image.PNG)
+
+                "waitForTag" -> {
+                    val payload = payloadJson.decodeFromJsonElement<WaitForTagPayload>(request.payload)
+                    call.respond(driver.waitForTag(payload.tag, payload.timeoutMs))
+                }
 
                 else -> error("Unknown operation \"${request.operation}\"")
             }

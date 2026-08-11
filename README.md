@@ -168,8 +168,8 @@ launches it. Run either with `--help` for the full option list.
 
 ## Driving an app over HTTP or MCP
 
-Both standalone servers wrap the exact same five `BridgeDriver` operations — pick
-whichever transport fits your tooling.
+Both standalone servers wrap the same `BridgeDriver` core operations, plus the
+`waitForTag` convenience helper — pick whichever transport fits your tooling.
 
 **HTTP (`cmp-bridge-http-server`)** exposes them all behind a single endpoint,
 `POST /bridge` (on `--server-port`, default `8090`). The request body is an envelope —
@@ -183,6 +183,7 @@ whichever transport fits your tooling.
 | `setText` | `{"tag": "...", "text": "..."}` | Clicks the element, then types `text` into it. |
 | `scroll` | `{"anchorTag": "...", "deltaY": N}` | Scroll gesture centered on `anchorTag`'s bounds. |
 | `screenshot` | — | The app's current frame as a PNG (binary response). |
+| `waitForTag` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag` appears, up to `timeoutMs` (default 15000); errors on timeout. |
 
 ```bash
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' -d '{"operation":"getHierarchy"}'
@@ -194,6 +195,8 @@ curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"operation":"scroll","payload":{"anchorTag":"item_list","deltaY":5}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"operation":"screenshot"}' -o screenshot.png
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"operation":"waitForTag","payload":{"tag":"status_text"}}'
 ```
 
 A failed operation (unknown tag, timeout, an unrecognized `operation`, ...) comes back
@@ -209,6 +212,7 @@ for pointing an LLM agent (Claude, or any other MCP client) at a running app:
 | `set_text` | `tag`, `text` |
 | `scroll` | `anchorTag`, `deltaY` |
 | `screenshot` | — (returns an image, not text) |
+| `wait_for_tag` | `tag`, `timeoutMs` (optional, default 15000) |
 
 Point an MCP client at it with a config like:
 

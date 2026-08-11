@@ -12,18 +12,20 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import java.util.Base64
 
 private val json = Json { ignoreUnknownKeys = true }
 
-/** Registers one MCP tool per [BridgeDriver] operation on [server]. */
+/** Registers one MCP tool per [BridgeDriver] core operation, plus [BridgeDriver.waitForTag], on [server]. */
 fun Server.registerBridgeTools(driver: BridgeDriver) {
     registerGetHierarchyTool(driver)
     registerClickTool(driver)
     registerSetTextTool(driver)
     registerScrollTool(driver)
     registerScreenshotTool(driver)
+    registerWaitForTagTool(driver)
 }
 
 private fun Server.registerGetHierarchyTool(driver: BridgeDriver) {
@@ -103,6 +105,44 @@ private fun Server.registerScreenshotTool(driver: BridgeDriver) {
             val png = driver.screenshot()
             val image = ImageContent(data = Base64.getEncoder().encodeToString(png), mimeType = "image/png")
             CallToolResult(content = listOf(image))
+        }
+    }
+}
+
+private fun Server.registerWaitForTagTool(driver: BridgeDriver) {
+    addTool(
+        name = "wait_for_tag",
+        description =
+        "Polls the app's UI tree until the element with the given test tag appears (or errors " +
+            "on timeout), instead of repeatedly calling get_hierarchy yourself while waiting for " +
+            "something to show up.",
+        inputSchema =
+        ToolSchema(
+            properties =
+            buildJsonObject {
+                put(
+                    "tag",
+                    buildJsonObject {
+                        put("type", "string")
+                        put("description", "The element's test tag")
+                    },
+                )
+                put(
+                    "timeoutMs",
+                    buildJsonObject {
+                        put("type", "integer")
+                        put("description", "Max time to wait, in milliseconds (default 15000)")
+                    },
+                )
+            },
+            required = listOf("tag"),
+        ),
+    ) { request ->
+        safeCall {
+            val tag = request.arguments.stringArg("tag")
+            val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
+            val node = if (timeoutMs != null) driver.waitForTag(tag, timeoutMs) else driver.waitForTag(tag)
+            CallToolResult(content = listOf(TextContent(text = json.encodeToString(node))))
         }
     }
 }
