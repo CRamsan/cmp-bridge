@@ -69,10 +69,10 @@ instead.
 dependencies {
     // Embed in your app (desktop-only bridge server; the wasmJs target needs no
     // extra dependency at all — see "How it works, briefly" above).
-    implementation("com.cramsan.cmpbridge:cmp-bridge:0.1.0")
+    implementation("com.cramsan.cmpbridge:cmp-bridge:0.1.0.3")
 
     // Add to your test source set to drive an app directly.
-    testImplementation("com.cramsan.cmpbridge:cmp-bridge-driver:0.1.0")
+    testImplementation("com.cramsan.cmpbridge:cmp-bridge-driver:0.1.0.3")
 }
 ```
 
@@ -141,14 +141,11 @@ CMP_BRIDGE_ENABLED=true ./gradlew :cmp-bridge-sample:run
 ```
 
 This opens the sample app with the bridge listening on `127.0.0.1:8901`. In another
-terminal, point either standalone server at it:
+terminal, point the HTTP server at it:
 
 ```bash
 ./gradlew :cmp-bridge-http-server:run --args="--platform desktop"
-curl http://127.0.0.1:8090/hierarchy
-
-# or, for an MCP client:
-./gradlew :cmp-bridge-mcp-server:run --args="--platform desktop"
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' -d '{"operation":"getHierarchy"}'
 ```
 
 **Web**
@@ -163,19 +160,40 @@ Then, once the dev server is up:
 ./gradlew :cmp-bridge-http-server:run --args="--platform web --url http://127.0.0.1:8080/"
 ```
 
-Both standalone servers assume the app (or dev server) is already running — neither one
-launches it. Run either with `--help` for the full option list.
+There's no `curl`-equivalent quick check for the MCP path — MCP needs a real client
+speaking the protocol, not a one-off request, so `./gradlew :cmp-bridge-mcp-server:run`
+on its own won't show you anything happening. To try that path instead, build the fat
+jar (`./gradlew :cmp-bridge-mcp-server:shadowJar`) and point an MCP client at it — see
+"Driving an app over HTTP or MCP" below for the client config and full tool list.
 
 ## Driving an app over HTTP or MCP
 
 Both standalone servers wrap the same `BridgeDriver` core operations, plus the
-`waitForTag`/`waitForText` convenience helpers — pick whichever transport fits your
-tooling.
+`waitForTag`/`waitForText` convenience helpers, and both work the same way: attach to an
+app (or wasmJs dev server) that already has its bridge armed, then talk to it over HTTP
+or MCP — pick whichever transport fits your tooling. Neither server ever launches the
+app itself.
 
-**HTTP (`cmp-bridge-http-server`)** exposes them all behind a single endpoint,
-`POST /bridge` (on `--server-port`, default `8090`). The request body is an envelope —
-`{"operation": "...", "payload": {...}}` — where `operation` picks the driver call and
-`payload` is that operation's own arguments (omitted for the two that take none):
+**HTTP (`cmp-bridge-http-server`)**
+
+1. **Have an app running with the bridge armed.** Either `cmp-bridge-sample` —
+   `CMP_BRIDGE_ENABLED=true ./gradlew :cmp-bridge-sample:run` for desktop (bridge listens
+   on `127.0.0.1:8901`), or `./gradlew :cmp-bridge-sample:wasmJsBrowserDevelopmentRun`
+   for web — or your own app wired the same way (see "Using it in your own app" above).
+2. **Build the fat jar** (once): `./gradlew :cmp-bridge-http-server:shadowJar` produces
+   `cmp-bridge-http-server/build/libs/cmp-bridge-http-server-all.jar` — or grab it from a
+   [GitHub Release](https://github.com/CRamsan/cmp-bridge/releases) instead of building.
+3. **Start it, pointing it at that app:**
+   ```bash
+   java -jar cmp-bridge-http-server-all.jar --platform desktop
+   # or, for web: --platform web --url http://127.0.0.1:8080/
+   ```
+   Run with `--help` for the full option list (`--host`/`--port` for desktop, `--url`
+   for web, plus `--server-port` for the HTTP server itself, default `8090`).
+4. **Send it requests.** It exposes every operation behind a single endpoint,
+   `POST /bridge` (on `--server-port`). The request body is an envelope —
+   `{"operation": "...", "payload": {...}}` — where `operation` picks the driver call and
+   `payload` is that operation's own arguments (omitted for the two that take none):
 
 | `operation` | `payload` | Description |
 |---|---|---|
@@ -198,43 +216,43 @@ curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"operation":"screenshot"}' -o screenshot.png
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"operation":"waitForTag","payload":{"tag":"status_text"}}'
+  -d '{"operation":"waitForTag","payload":{"tag":"greeting_text"}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"operation":"waitForText","payload":{"tag":"status_text"}}'
+  -d '{"operation":"waitForText","payload":{"tag":"greeting_text"}}'
 ```
 
 A failed operation (unknown tag, timeout, an unrecognized `operation`, ...) comes back
 as `400` with `{"error": "..."}` rather than a stack trace.
 
-**MCP (`cmp-bridge-mcp-server`)** exposes the same operations as MCP tools over stdio,
-for pointing an LLM agent (Claude, or any other MCP client) at a running app:
+**MCP (`cmp-bridge-mcp-server`)**
 
-| Tool | Arguments |
-|---|---|
-| `get_hierarchy` | — |
-| `click` | `tag` |
-| `set_text` | `tag`, `text` |
-| `scroll` | `anchorTag`, `deltaY` |
-| `screenshot` | — (returns an image, not text) |
-| `wait_for_tag` | `tag`, `timeoutMs` (optional, default 15000) |
-| `wait_for_text` | `tag`, `timeoutMs` (optional, default 15000) |
+1. **Have an app running with the bridge armed** — same as step 1 above.
+2. **Build the fat jar** (once): `./gradlew :cmp-bridge-mcp-server:shadowJar` produces
+   `cmp-bridge-mcp-server/build/libs/cmp-bridge-mcp-server-all.jar` — or grab it from a
+   [GitHub Release](https://github.com/CRamsan/cmp-bridge/releases) instead of building.
+3. **Point an MCP client at the jar**, passing the same `--platform`/`--host`/`--port`/
+   `--url` flags shown above, with a config like:
+   ```json
+   {
+     "mcpServers": {
+       "cmp-bridge": {
+         "command": "java",
+         "args": ["-jar", "/path/to/cmp-bridge-mcp-server-all.jar", "--platform", "desktop"]
+       }
+     }
+   }
+   ```
+4. **Call its tools** — it exposes the same operations as MCP tools over stdio:
 
-Point an MCP client at it with a config like:
-
-```json
-{
-  "mcpServers": {
-    "cmp-bridge": {
-      "command": "/path/to/cmp-bridge/gradlew",
-      "args": ["-q", "--project-dir", "/path/to/cmp-bridge", ":cmp-bridge-mcp-server:run",
-               "--args=--platform desktop"]
-    }
-  }
-}
-```
-
-or run the assembled application/fat jar directly once built, passing the same
-`--platform`/`--host`/`--port`/`--url` flags shown above.
+   | Tool | Arguments |
+   |---|---|
+   | `get_hierarchy` | — |
+   | `click` | `tag` |
+   | `set_text` | `tag`, `text` |
+   | `scroll` | `anchorTag`, `deltaY` |
+   | `screenshot` | — (returns an image, not text) |
+   | `wait_for_tag` | `tag`, `timeoutMs` (optional, default 15000) |
+   | `wait_for_text` | `tag`, `timeoutMs` (optional, default 15000) |
 
 ## License
 
