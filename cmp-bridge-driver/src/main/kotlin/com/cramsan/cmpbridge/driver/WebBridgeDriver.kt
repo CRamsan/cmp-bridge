@@ -100,6 +100,7 @@ class WebBridgeDriver private constructor(
     companion object {
         private const val BRIDGE_TIMEOUT_MS = 30_000L
         private const val CHROMIUM_INSTALL_TIMEOUT_MS = 600_000L
+        private const val OUTPUT_DRAIN_TIMEOUT_MS = 2_000L
 
         // Tracks a single install across every target/thread in the process — see
         // ensureChromiumInstalled(). installFuture is only ever written inside installLock.
@@ -191,17 +192,26 @@ class WebBridgeDriver private constructor(
         private fun runChromiumInstallProcess() {
             val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
             val classpath = System.getProperty("java.class.path")
-            val logFile = File.createTempFile("cmp-bridge-playwright-install", ".log").apply { deleteOnExit() }
             val process =
                 ProcessBuilder(javaBin, "-cp", classpath, "com.microsoft.playwright.CLI", "install", "chromium")
                     .redirectErrorStream(true)
-                    .redirectOutput(logFile)
                     .start()
+            // The CLI's own progress bar prints as plain lines (not carriage-return redraws) once
+            // it detects its output isn't a TTY, which is exactly this case — stream them straight
+            // to stderr as they arrive so download progress is visible while it's happening, not
+            // just a start/finish line. Runs on its own thread so it can't itself block the
+            // waitFor/timeout logic below if the process hangs without producing more output.
+            val outputThread =
+                Thread({
+                    process.inputStream.bufferedReader().forEachLine { line ->
+                        System.err.println("[cmp-bridge-driver] $line")
+                    }
+                }, "cmp-bridge-playwright-install-output").apply {
+                    isDaemon = true
+                    start()
+                }
+
             val finished = process.waitFor(CHROMIUM_INSTALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            if (finished && process.exitValue() == 0) {
-                logFile.delete()
-                return
-            }
             if (!finished) {
                 // The CLI shells out to a bundled Node.js process to do the actual download;
                 // destroying just this JVM leaves that child running unsupervised in the
@@ -209,10 +219,10 @@ class WebBridgeDriver private constructor(
                 process.toHandle().descendants().forEach { it.destroyForcibly() }
                 process.destroyForcibly()
             }
-            error(
-                "Failed to install Chromium for Playwright within ${CHROMIUM_INSTALL_TIMEOUT_MS}ms\n" +
-                    "Log: ${logFile.absolutePath}",
-            )
+            outputThread.join(OUTPUT_DRAIN_TIMEOUT_MS)
+
+            if (finished && process.exitValue() == 0) return
+            error("Failed to install Chromium for Playwright within ${CHROMIUM_INSTALL_TIMEOUT_MS}ms")
         }
 
         /**
