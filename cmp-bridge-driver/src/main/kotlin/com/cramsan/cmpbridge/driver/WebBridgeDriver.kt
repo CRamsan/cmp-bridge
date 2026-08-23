@@ -8,6 +8,9 @@ import com.microsoft.playwright.Playwright
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Path
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 
 private val json = Json { ignoreUnknownKeys = true }
@@ -96,7 +99,18 @@ class WebBridgeDriver private constructor(
 
     companion object {
         private const val BRIDGE_TIMEOUT_MS = 30_000L
-        private const val CHROMIUM_INSTALL_TIMEOUT_MS = 300_000L
+        private const val CHROMIUM_INSTALL_TIMEOUT_MS = 600_000L
+
+        // Tracks a single install across every target/thread in the process — see
+        // ensureChromiumInstalled(). installFuture is only ever written inside installLock.
+        private val installLock = Any()
+
+        @Volatile
+        private var installFuture: Future<*>? = null
+        private val installExecutor =
+            Executors.newSingleThreadExecutor { runnable ->
+                Thread(runnable, "cmp-bridge-playwright-install").apply { isDaemon = true }
+            }
 
         /** Attaches to a wasmJs app that's already running at [url]. */
         fun connect(url: String): WebBridgeDriver {
@@ -127,9 +141,54 @@ class WebBridgeDriver private constructor(
          * (Chromium, Firefox, WebKit — hundreds of MiB) on first use even though this driver only
          * ever launches Chromium; scoping the install to just it here avoids that, and pairs with
          * `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` in [connect] so [Playwright.create] doesn't redo it.
+         *
+         * The install itself runs on a single background thread shared by every caller in this
+         * process — concurrent [connect] calls (even for different targets, where
+         * [BridgeSessionRegistry]'s own per-target locking doesn't help) share the one install
+         * instead of racing into separate downloads. A caller never blocks on the download itself:
+         * while it's running, every caller fails fast with a clear "try again" message instead of
+         * hanging for however long the download takes — connecting a web target the first time on
+         * a machine is expected to fail once or twice before it succeeds.
          */
         private fun ensureChromiumInstalled() {
             if (resolveCachedChromiumExecutable() != null) return
+
+            val future = installFuture ?: synchronized(installLock) { installFuture ?: startChromiumInstall() }
+
+            if (!future.isDone) {
+                error(
+                    "Chromium isn't installed yet — a first-time install (~500 MiB) just started " +
+                        "in the background; see server logs for progress. Try this request again " +
+                        "in a few minutes.",
+                )
+            }
+            try {
+                future.get()
+            } catch (e: ExecutionException) {
+                synchronized(installLock) { installFuture = null } // let the next caller retry
+                throw (e.cause ?: e)
+            }
+        }
+
+        /** Starts the background install (assumes [installLock] is held) and records its [Future]. */
+        @Suppress("TooGenericExceptionCaught")
+        private fun startChromiumInstall(): Future<*> {
+            System.err.println(
+                "[cmp-bridge-driver] Chromium not found — installing in the background (first web " +
+                    "request only, ~500 MiB, can take several minutes on a slow connection)...",
+            )
+            return installExecutor.submit {
+                try {
+                    runChromiumInstallProcess()
+                    System.err.println("[cmp-bridge-driver] Chromium install finished — ready for use.")
+                } catch (e: Exception) {
+                    System.err.println("[cmp-bridge-driver] Chromium install failed: ${e.message}")
+                    throw e
+                }
+            }.also { installFuture = it }
+        }
+
+        private fun runChromiumInstallProcess() {
             val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
             val classpath = System.getProperty("java.class.path")
             val logFile = File.createTempFile("cmp-bridge-playwright-install", ".log").apply { deleteOnExit() }
@@ -143,7 +202,13 @@ class WebBridgeDriver private constructor(
                 logFile.delete()
                 return
             }
-            if (!finished) process.destroyForcibly()
+            if (!finished) {
+                // The CLI shells out to a bundled Node.js process to do the actual download;
+                // destroying just this JVM leaves that child running unsupervised in the
+                // background indefinitely. Kill the whole descendant tree, not just this process.
+                process.toHandle().descendants().forEach { it.destroyForcibly() }
+                process.destroyForcibly()
+            }
             error(
                 "Failed to install Chromium for Playwright within ${CHROMIUM_INSTALL_TIMEOUT_MS}ms\n" +
                     "Log: ${logFile.absolutePath}",
