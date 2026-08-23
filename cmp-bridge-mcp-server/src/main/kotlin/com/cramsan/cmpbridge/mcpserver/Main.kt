@@ -1,17 +1,13 @@
 package com.cramsan.cmpbridge.mcpserver
 
-import com.cramsan.cmpbridge.driver.BridgeDriver
-import com.cramsan.cmpbridge.driver.DesktopBridgeDriver
-import com.cramsan.cmpbridge.driver.WebBridgeDriver
+import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.parameters.groups.OptionGroup
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
-import com.github.ajalt.clikt.parameters.options.required
-import com.github.ajalt.clikt.parameters.types.choice
-import com.github.ajalt.clikt.parameters.types.int
+import com.github.ajalt.clikt.parameters.types.long
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
@@ -24,11 +20,13 @@ import kotlinx.io.asSource
 import kotlinx.io.buffered
 import java.io.PrintStream
 
-private const val DEFAULT_DESKTOP_PORT = 8901
+private const val DEFAULT_MAX_IDLE_MS = 300_000L
+private const val DEFAULT_MAX_SESSION_MS = 1_800_000L
 
 /**
- * Serves an already-running app's UI bridge over MCP (stdio transport) — never launches an app
- * itself. Registers one MCP tool per [BridgeDriver] operation.
+ * Serves MCP (stdio transport) tools that can attach to any number of already-running apps' UI
+ * bridges over the process's lifetime — which app a given tool call targets is resolved per call
+ * (see [BridgeSessionRegistry]), not at launch. Never launches an app itself.
  *
  * **Nothing may write to stdout except the MCP JSON-RPC stream itself.** [main] captures real
  * stdout first and redirects `System.out` to stderr immediately after, so any stray output lands
@@ -38,12 +36,12 @@ private class BridgeMcpServerCommand(private val realStdout: PrintStream) :
     CliktCommand(
         name = "cmp-bridge-mcp-server",
     ) {
-    private val options by BridgeExplorerOptions()
+    private val options by SessionOptions()
 
     override fun run() {
-        val driver = options.connect()
+        val registry = BridgeSessionRegistry(options.maxIdleMs, options.maxSessionMs)
         runBlocking {
-            val server = buildServer(driver)
+            val server = buildServer(registry)
             val closed = CompletableDeferred<Unit>()
             server.onClose { closed.complete(Unit) }
             server.createSession(
@@ -53,38 +51,33 @@ private class BridgeMcpServerCommand(private val realStdout: PrintStream) :
                 ),
             )
             closed.await()
-            driver.close()
+            registry.close()
         }
     }
 }
 
 /**
- * Connection args for attaching to an already-running app — never launches anything itself.
- * Duplicated verbatim in `cmp-bridge-http-server` rather than shared through a third module.
+ * Session cache limits for [BridgeSessionRegistry]. Duplicated verbatim in `cmp-bridge-http-server`
+ * rather than shared through a third module.
  */
-internal class BridgeExplorerOptions : OptionGroup(name = "Bridge connection") {
-    val platform: String by option("--platform", help = "\"desktop\" or \"web\"").choice("desktop", "web").required()
-    val host: String by option("--host", help = "Desktop bridge host").default("127.0.0.1")
-    val port: Int by option("--port", help = "Desktop bridge port").int().default(DEFAULT_DESKTOP_PORT)
-    val url: String? by option(
-        "--url",
-        help = "URL of the already-running wasmJs dev server (required for --platform=web)",
-    )
-
-    fun connect(): BridgeDriver = when (platform) {
-        "desktop" -> DesktopBridgeDriver.connect(host, port)
-        "web" -> WebBridgeDriver.connect(url ?: error("--url is required when --platform=web"))
-        else -> error("Unknown platform \"$platform\"")
-    }
+internal class SessionOptions : OptionGroup(name = "Session limits") {
+    val maxIdleMs: Long by option(
+        "--max-idle-ms",
+        help = "Close a target's session after this long unused",
+    ).long().default(DEFAULT_MAX_IDLE_MS)
+    val maxSessionMs: Long by option(
+        "--max-session-ms",
+        help = "Close a target's session after this long since it was first opened, regardless of use",
+    ).long().default(DEFAULT_MAX_SESSION_MS)
 }
 
-private fun buildServer(driver: BridgeDriver): Server {
+private fun buildServer(registry: BridgeSessionRegistry): Server {
     val server =
         Server(
             serverInfo = Implementation(name = "cmp-bridge", version = "1.0.0"),
             options = ServerOptions(capabilities = ServerCapabilities(tools = ServerCapabilities.Tools())),
         )
-    server.registerBridgeTools(driver)
+    server.registerBridgeTools(registry)
     return server
 }
 

@@ -7,9 +7,9 @@ Multiplatform apps (currently desktop/JVM and wasmJs web).
 
 It is split into a library that ships inside an app and a set of standalone tools that
 drive an app from outside it. Everything is built around one shared vocabulary: a
-platform-independent tree of `HierarchyNode`s and five operations (`getHierarchy`,
-`click`, `setText`, `scroll`, `screenshot`) defined once by the `BridgeDriver`
-interface.
+platform-independent tree of `HierarchyNode`s and a core set of operations
+(`getHierarchy`, `click`, `setText`, `scroll`, `screenshot`) defined once by the
+`BridgeDriver` interface.
 
 ## Module map
 
@@ -31,7 +31,7 @@ graph TD
 | Module | Kind | Depends on | Role |
 |---|---|---|---|
 | `cmp-bridge` | KMP library (android, jvm, wasmJs); bridge server is jvm-only | — | Ships inside the app under test. Defines the wire protocol and `HierarchyNode`, and on desktop runs the in-process bridge server. |
-| `cmp-bridge-driver` | JVM library | `cmp-bridge` | Consumed by an app's own test code. `BridgeDriver` interface plus its desktop and web implementations, plus helpers to launch/tear down the app or dev server under test. |
+| `cmp-bridge-driver` | JVM library | `cmp-bridge` | Consumed by an app's own test code. `BridgeDriver` interface plus its desktop and web implementations, helpers to launch/tear down the app or dev server under test, and `BridgeTarget`/`BridgeSessionRegistry` for resolving a driver by target on demand (used by both standalone servers). |
 | `cmp-bridge-http-server` | JVM application | `cmp-bridge-driver` | Standalone process exposing a `BridgeDriver` over a local REST API, for non-JVM tooling. |
 | `cmp-bridge-mcp-server` | JVM application | `cmp-bridge-driver` | Standalone process exposing a `BridgeDriver` over MCP (stdio), for LLM agents. |
 | `cmp-bridge-sample` | KMP application (jvm, wasmJs) | `cmp-bridge`, `cmp-bridge-driver` (test-only) | Minimal demo screen used as the real end-to-end fixture: the same UI is driven on both platforms in `DemoScenarioTest`. |
@@ -62,40 +62,35 @@ try to paper over that at the transport level — it only unifies the *result*
 ### Desktop (JVM): an in-app socket server
 
 `DesktopBridgeServer` (in `cmp-bridge`, jvmMain-only) is object code linked into the
-app itself. `startIfEnabled(window, scope)` is a no-op unless the app was launched with
-`CMP_BRIDGE_ENABLED=true` or `-DcmpBridge.enabled=true` — it must be opt-in, since the
-mechanisms it uses would be a liability in a shipped build. Both an env var and a system
-property are supported deliberately: a `-D` flag isn't inherited by a forked child
-process on any launcher (Gradle's `JavaExec`, an IDE run configuration, ...) unless that
-launcher explicitly forwards it, while an env var is, by default, virtually everywhere —
-so the env var is what actually works out of the box through something like
-`./gradlew :app:run` for any app embedding this library, with no Gradle changes needed
-on that app's end. The system property stays supported for callers that construct the
-process directly (`DesktopAppProcess`) or invoke `java` themselves.
+app itself. `startIfEnabled(window, scope)` is a no-op unless the app is launched with
+`CMP_BRIDGE_ENABLED=true` or `-DcmpBridge.enabled=true`. The env var is inherited by a
+forked child process by default (Gradle's `JavaExec`, an IDE run configuration, ...),
+so it works through something like `./gradlew :app:run` with no changes needed on that
+app's end; the system property covers callers that construct the process directly
+(`DesktopAppProcess`) or invoke `java` themselves.
 
 - **Reads** come from `ComposeWindow.semanticsOwners` — the real semantics tree,
   queried fresh on every request, never cached.
 - **Writes** (click, type, scroll) are synthesized as real AWT `MouseEvent`/
   `MouseWheelEvent`/`KeyEvent`s posted onto the app's own `EventQueue`, targeting
   whichever component in the window actually has mouse listeners registered (found by
-  walking the AWT component tree, not hardcoded — that internal nesting is
-  version-dependent). This deliberately avoids `java.awt.Robot`, which drives the OS
-  input queue rather than the app, and would fail in headless/CI environments.
-  Multi-character text entry goes through the system clipboard + Ctrl+V rather than
-  simulated keystrokes, since per-character key simulation doesn't reliably handle
+  walking the AWT component tree, since that internal nesting is version-dependent).
+  Never `java.awt.Robot`, which drives the OS input queue rather than the app and
+  doesn't work in headless/CI environments. Multi-character text entry goes through the
+  system clipboard + Ctrl+V; per-character key simulation doesn't reliably handle
   unicode/locale-specific input.
-- **Screenshots** are taken via `SkiaLayer.screenshot()` — Compose Desktop renders through Skia
-  directly, bypassing the standard AWT/Swing paint chain entirely, so `Component.paint()` into an
-  off-screen image only ever captures a blank background. `Robot.createScreenCapture` was also
-  rejected: it reads real screen pixels, which needs an actual mapped, unoccluded window and X11
-  permission to capture it — fragile in exactly the kind of sandboxed/CI environment this bridge
-  needs to work in.
+- **Screenshots** come from `SkiaLayer.screenshot()` — Compose Desktop renders through
+  Skia directly, bypassing the standard AWT/Swing paint chain, so `Component.paint()`
+  into an off-screen image only ever captures a blank background. Not
+  `Robot.createScreenCapture`, which reads real screen pixels and needs an actual
+  mapped, unoccluded window plus X11 permission — unreliable in the sandboxed/CI
+  environments this bridge targets.
 
 `DesktopBridgeServer` accepts one connection per client and speaks the
 `BridgeCommand`/`BridgeResponse` line protocol described above. `DesktopBridgeDriver`
 (in `cmp-bridge-driver`) is the client side: `connect(host, port)` waits for the socket
-to become connectable, then opens a fresh `Socket` per command (it owns no persistent
-connection or process — see "Connecting vs. launching" below).
+to become connectable, then opens a fresh `Socket` per command — it owns no persistent
+connection or process (see "Connecting vs. launching" below).
 
 ### Web (wasmJs): Compose Multiplatform's built-in accessibility DOM
 
@@ -128,8 +123,8 @@ test code — is written against this interface, not against either platform's t
 
 ### Connecting vs. launching
 
-`cmp-bridge-driver` deliberately separates *attaching to an already-running app* from
-*launching one*:
+`cmp-bridge-driver` separates *attaching to an already-running app* from *launching
+one*:
 
 - `DesktopBridgeDriver.connect` / `WebBridgeDriver.connect` only ever attach — `close()`
   never touches a process.
@@ -141,35 +136,67 @@ test code — is written against this interface, not against either platform's t
   by driver`) so a caller that launched its own app gets single-call teardown (driver
   first, then the process) instead of managing both lifecycles by hand.
 
-This split exists because the http/mcp servers only ever attach to an app someone else
-already started (see below), while `cmp-bridge-sample`'s own tests need to launch a
-disposable instance per test run — the same `BridgeDriver` implementations serve both.
+The http/mcp servers only ever attach to an app someone else already started (see
+below); `cmp-bridge-sample`'s own tests launch a disposable instance per test run. The
+same `BridgeDriver` implementations serve both.
 
 ## Standalone servers: exposing a `BridgeDriver` to the outside world
 
-`cmp-bridge-http-server` and `cmp-bridge-mcp-server` are structurally identical: a
-Clikt CLI takes `--platform desktop|web` plus connection args (`--host`/`--port` for
-desktop, `--url` for web — see `BridgeExplorerOptions`, intentionally duplicated in
-both modules rather than shared through a third one), connects a `BridgeDriver`, and
-adapts its five core operations, plus the `waitForTag`/`waitForText` convenience
-helpers, to a different transport. Neither ever launches an app — both assume one is
-already running with the bridge armed (or a wasmJs dev server is already up).
+`cmp-bridge-http-server` and `cmp-bridge-mcp-server` are structurally identical: each
+is one long-running process that resolves its target app instance **per
+request/tool-call**, so a single running instance can drive any number of apps over its
+lifetime. Both adapt the same `BridgeDriver` core operations, plus the
+`waitForTag`/`waitForText` convenience helpers and a `disconnect` operation, to a
+different transport. Neither ever launches an app — both only attach to one that's
+already running with the bridge armed (or a wasmJs dev server already up).
+
+### `BridgeSessionRegistry`: resolving a target per call
+
+Both servers hold one `BridgeSessionRegistry` (`cmp-bridge-driver/BridgeSessionRegistry.kt`)
+for their whole lifetime and resolve every request's/tool-call's target through it,
+rather than connecting a `BridgeDriver` directly:
+
+- **`BridgeTarget`** (`platform`, plus `host`/`port` for desktop or `url` for web) is
+  the plain-data key identifying which app instance to attach to.
+- **`resolve(target)`** connects and caches a driver for `target` on first use
+  (`ConcurrentHashMap.computeIfAbsent`, so two concurrent first calls for the same
+  never-seen target can't race into two connects), and touches its last-used timestamp
+  on every subsequent call. `DesktopBridgeDriver.connect` is a cheap reachability poll;
+  `WebBridgeDriver.connect` launches a real headless Chromium via Playwright — caching
+  is what keeps a web target's per-call cost down to the actual driver operation.
+- A background sweep (a plain `ScheduledExecutorService`) evicts a session once it's
+  been idle past `maxIdleMs` or alive past `maxSessionMs`, whichever comes first;
+  `disconnect(target)` ends one immediately instead of waiting on either limit. Both
+  limits are constructor params, exposed by each server as
+  `--max-idle-ms`/`--max-session-ms` (defaults: 5 minutes idle, 30 minutes total).
+- `connect`/`nowMs` are constructor-injectable seams for tests
+  (`BridgeSessionRegistryTest`); production code uses the default `when (platform) {
+  "desktop" -> ...; "web" -> ... }` dispatch and the real clock.
+
+This sits in front of `BridgeDriver` as a resolution/caching layer without changing the
+interface itself, and is shared identically by both servers.
 
 - **`cmp-bridge-http-server`**: Ktor + Netty, a single `POST /bridge` endpoint. The
-  request body is an envelope, `{"operation": "...", "payload": {...}}`, dispatched in
-  `Routes.kt` on `operation` to the matching `BridgeDriver` call with `payload` decoded
-  into that operation's own argument type. `Routes.kt` is a thin adapter only; every
-  branch calls straight into the driver, and `BridgeDriver` failures — including an
+  request body is an envelope, `{"target": {...}, "operation": "...", "payload": {...}}`,
+  dispatched in `Routes.kt` on `operation` to the matching `BridgeDriver` call (resolved
+  from `target` via the registry) with `payload` decoded into that operation's own
+  argument type. `Routes.kt` is a thin adapter only; every branch calls straight into
+  the driver, and `BridgeDriver`/`BridgeSessionRegistry` failures — including an
   unrecognized `operation` — are surfaced as `400` with the exception's message via a
-  `StatusPages` handler, not a generic `500`.
+  `StatusPages` handler, not a generic `500`. CLI options are just `--server-port` plus
+  the session-limit flags (`SessionOptions`, duplicated verbatim in `cmp-bridge-mcp-server`).
 - **`cmp-bridge-mcp-server`**: MCP over stdio (`kotlin-sdk`), one tool per driver
   operation (`get_hierarchy`, `click`, `set_text`, `scroll`, `screenshot`,
-  `wait_for_tag`, `wait_for_text`), registered in `Tools.kt`. Because the MCP JSON-RPC
-  stream *is* stdout, `main` captures the real `System.out` before anything else runs
-  and redirects `System.out` to stderr for the rest of the process — any stray print
-  from a dependency lands somewhere harmless instead of corrupting the wire protocol.
-  Driver failures are caught per-tool-call (`safeCall`) and turned into an MCP
-  tool-level error rather than crashing the session.
+  `wait_for_tag`, `wait_for_text`) plus `disconnect`, registered in `Tools.kt`. Every
+  tool's input schema carries the target fields (`platform`/`host`/`port`/`url`)
+  alongside its own arguments — `safeCall` resolves a driver from them via the registry
+  before doing anything else. Because the MCP JSON-RPC stream *is* stdout, `main`
+  captures the real `System.out` before anything else runs and redirects `System.out`
+  to stderr for the rest of the process — any stray print from a dependency lands
+  somewhere harmless instead of corrupting the wire protocol. Driver/registry failures
+  are caught per-tool-call (`safeCall`) and turned into an MCP tool-level error rather
+  than crashing the session; the same `safeCall` also logs each call's operation,
+  arguments (target included), and outcome to stderr.
 
 ## `cmp-bridge-sample`: the real fixture
 
@@ -192,7 +219,7 @@ gaps are tracked rather than silently swallowed:
   `DesktopBridgeServer` masks them (also tracked there).
 - A `BasicTextField`'s bounds can permanently read as zero in the web accessibility DOM
   even though its live text is still correct — `DemoScenarioTest`'s web case documents
-  exactly which of the five operations it does and doesn't exercise as a result.
+  exactly which core operations it does and doesn't exercise as a result.
 
 Callers driving both platforms with the same test code should treat these as platform
 capability differences to poll/branch around, not as bugs in the caller's own test.
@@ -210,7 +237,7 @@ capability differences to poll/branch around, not as bugs in the caller's own te
   would, rather than bypassing them.
 - **`BridgeDriver` is the only shared surface above the transport.** Desktop and web
   stay free to diverge in how they read/write (socket protocol vs. Playwright) as long
-  as both produce `HierarchyNode` and implement the same five operations. Don't
+  as both produce `HierarchyNode` and implement the same core operations. Don't
   smuggle platform-specific concepts up through the interface.
 - **Connect and launch are separate concerns.** `*BridgeDriver.connect` never owns a
   process; `*Process.launch` never speaks the bridge protocol. `ManagedBridgeDriver` is

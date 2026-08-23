@@ -28,6 +28,11 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json")
     implementation("com.github.ajalt.clikt:clikt:_")
 
+    // Without a real SLF4J binding on the classpath, Ktor's CallLogging plugin (installed in
+    // Routes.kt) silently produces nothing — slf4j-simple is a zero-config binding that prints
+    // straight to stderr, which is all CallLogging's per-request access log needs here.
+    runtimeOnly("org.slf4j:slf4j-simple:_")
+
     detektPlugins("dev.detekt:detekt-rules-ktlint-wrapper:_")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:_")

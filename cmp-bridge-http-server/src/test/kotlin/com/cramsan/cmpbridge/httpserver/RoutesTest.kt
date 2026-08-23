@@ -2,6 +2,7 @@ package com.cramsan.cmpbridge.httpserver
 
 import com.cramsan.cmpbridge.HierarchyNode
 import com.cramsan.cmpbridge.driver.BridgeDriver
+import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -15,6 +16,8 @@ import io.ktor.server.testing.testApplication
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+
+private const val TEST_SESSION_LIMIT_MS = 3_600_000L
 
 private val ROOT_NODE =
     HierarchyNode(
@@ -78,6 +81,7 @@ private class FakeBridgeDriver : BridgeDriver {
     var lastScroll: Pair<String, Int>? = null
     var shouldFailClick = false
     var tree: HierarchyNode = ROOT_NODE
+    var closed = false
 
     override fun getHierarchy(): HierarchyNode = tree
 
@@ -96,19 +100,28 @@ private class FakeBridgeDriver : BridgeDriver {
 
     override fun screenshot(): ByteArray = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47)
 
-    override fun close() = Unit
+    override fun close() {
+        closed = true
+    }
 }
+
+/** A registry whose [connect] always returns [driver], regardless of the request's target. */
+private fun testRegistry(driver: BridgeDriver) = BridgeSessionRegistry(
+    maxIdleMs = TEST_SESSION_LIMIT_MS,
+    maxSessionMs = TEST_SESSION_LIMIT_MS,
+    connect = { driver },
+)
 
 class RoutesTest {
     @Test
     fun `POST bridge with getHierarchy returns the driver's tree`() = testApplication {
-        application { bridgeHttpModule(FakeBridgeDriver()) }
+        application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"getHierarchy"}""")
+                setBody("""{"target":{"platform":"desktop"},"operation":"getHierarchy"}""")
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -118,13 +131,13 @@ class RoutesTest {
     @Test
     fun `POST bridge with click delegates to the driver`() = testApplication {
         val driver = FakeBridgeDriver()
-        application { bridgeHttpModule(driver) }
+        application { bridgeHttpModule(testRegistry(driver)) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"click","payload":{"tag":"my_tag"}}""")
+                setBody("""{"target":{"platform":"desktop"},"operation":"click","payload":{"tag":"my_tag"}}""")
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -134,13 +147,16 @@ class RoutesTest {
     @Test
     fun `POST bridge with setText delegates to the driver`() = testApplication {
         val driver = FakeBridgeDriver()
-        application { bridgeHttpModule(driver) }
+        application { bridgeHttpModule(testRegistry(driver)) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"setText","payload":{"tag":"my_tag","text":"hello"}}""")
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"setText",""" +
+                        """"payload":{"tag":"my_tag","text":"hello"}}""",
+                )
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -150,13 +166,16 @@ class RoutesTest {
     @Test
     fun `POST bridge with scroll delegates to the driver`() = testApplication {
         val driver = FakeBridgeDriver()
-        application { bridgeHttpModule(driver) }
+        application { bridgeHttpModule(testRegistry(driver)) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"scroll","payload":{"anchorTag":"my_tag","deltaY":40}}""")
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"scroll",""" +
+                        """"payload":{"anchorTag":"my_tag","deltaY":40}}""",
+                )
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -165,13 +184,13 @@ class RoutesTest {
 
     @Test
     fun `POST bridge with screenshot returns PNG bytes`() = testApplication {
-        application { bridgeHttpModule(FakeBridgeDriver()) }
+        application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"screenshot"}""")
+                setBody("""{"target":{"platform":"desktop"},"operation":"screenshot"}""")
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -181,13 +200,13 @@ class RoutesTest {
     @Test
     fun `POST bridge with click on a failing driver returns 400 with the error message`() = testApplication {
         val driver = FakeBridgeDriver().apply { shouldFailClick = true }
-        application { bridgeHttpModule(driver) }
+        application { bridgeHttpModule(testRegistry(driver)) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"click","payload":{"tag":"missing"}}""")
+                setBody("""{"target":{"platform":"desktop"},"operation":"click","payload":{"tag":"missing"}}""")
             }
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
@@ -197,13 +216,16 @@ class RoutesTest {
     @Test
     fun `POST bridge with waitForTag returns the node once it's already present`() = testApplication {
         val driver = FakeBridgeDriver().apply { tree = TAGGED_NODE }
-        application { bridgeHttpModule(driver) }
+        application { bridgeHttpModule(testRegistry(driver)) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"waitForTag","payload":{"tag":"my_tag","timeoutMs":1000}}""")
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"waitForTag",""" +
+                        """"payload":{"tag":"my_tag","timeoutMs":1000}}""",
+                )
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -212,13 +234,16 @@ class RoutesTest {
 
     @Test
     fun `POST bridge with waitForTag on a tag that never appears returns 400 after the timeout`() = testApplication {
-        application { bridgeHttpModule(FakeBridgeDriver()) }
+        application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"waitForTag","payload":{"tag":"missing","timeoutMs":200}}""")
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"waitForTag",""" +
+                        """"payload":{"tag":"missing","timeoutMs":200}}""",
+                )
             }
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
@@ -228,13 +253,16 @@ class RoutesTest {
     @Test
     fun `POST bridge with waitForText returns the node once its text is settled`() = testApplication {
         val driver = FakeBridgeDriver().apply { tree = TAGGED_NODE }
-        application { bridgeHttpModule(driver) }
+        application { bridgeHttpModule(testRegistry(driver)) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"waitForText","payload":{"tag":"my_tag","timeoutMs":1000}}""")
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"waitForText",""" +
+                        """"payload":{"tag":"my_tag","timeoutMs":1000}}""",
+                )
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
@@ -245,13 +273,16 @@ class RoutesTest {
     fun `POST bridge with waitForText on a tag whose text stays null returns 400 after the timeout`() =
         testApplication {
             val driver = FakeBridgeDriver().apply { tree = SILENT_NODE }
-            application { bridgeHttpModule(driver) }
+            application { bridgeHttpModule(testRegistry(driver)) }
             val client = createClient { install(ContentNegotiation) { json() } }
 
             val response =
                 client.post("/bridge") {
                     contentType(ContentType.Application.Json)
-                    setBody("""{"operation":"waitForText","payload":{"tag":"silent_tag","timeoutMs":200}}""")
+                    setBody(
+                        """{"target":{"platform":"desktop"},"operation":"waitForText",""" +
+                            """"payload":{"tag":"silent_tag","timeoutMs":200}}""",
+                    )
                 }
 
             assertEquals(HttpStatusCode.BadRequest, response.status)
@@ -260,13 +291,16 @@ class RoutesTest {
 
     @Test
     fun `POST bridge with waitForText on a tag that never appears returns 400 after the timeout`() = testApplication {
-        application { bridgeHttpModule(FakeBridgeDriver()) }
+        application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"waitForText","payload":{"tag":"missing","timeoutMs":200}}""")
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"waitForText",""" +
+                        """"payload":{"tag":"missing","timeoutMs":200}}""",
+                )
             }
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
@@ -275,16 +309,74 @@ class RoutesTest {
 
     @Test
     fun `POST bridge with an unknown operation returns 400`() = testApplication {
-        application { bridgeHttpModule(FakeBridgeDriver()) }
+        application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val response =
             client.post("/bridge") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"operation":"bogus"}""")
+                setBody("""{"target":{"platform":"desktop"},"operation":"bogus"}""")
             }
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertTrue(response.bodyAsText().contains("Unknown operation"))
+    }
+
+    @Test
+    fun `POST bridge resolves the same target only once across repeated requests`() = testApplication {
+        var connectCount = 0
+        val registry = BridgeSessionRegistry(
+            maxIdleMs = TEST_SESSION_LIMIT_MS,
+            maxSessionMs = TEST_SESSION_LIMIT_MS,
+            connect = {
+                connectCount++
+                FakeBridgeDriver()
+            },
+        )
+        application { bridgeHttpModule(registry) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        repeat(2) {
+            val response =
+                client.post("/bridge") {
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"target":{"platform":"desktop"},"operation":"getHierarchy"}""")
+                }
+            assertEquals(HttpStatusCode.OK, response.status)
+        }
+
+        assertEquals(1, connectCount)
+    }
+
+    @Test
+    fun `POST bridge with disconnect closes the session so the next request reconnects`() = testApplication {
+        var connectCount = 0
+        val registry = BridgeSessionRegistry(
+            maxIdleMs = TEST_SESSION_LIMIT_MS,
+            maxSessionMs = TEST_SESSION_LIMIT_MS,
+            connect = {
+                connectCount++
+                FakeBridgeDriver()
+            },
+        )
+        application { bridgeHttpModule(registry) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        client.post("/bridge") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"target":{"platform":"desktop"},"operation":"getHierarchy"}""")
+        }
+        val disconnectResponse =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"target":{"platform":"desktop"},"operation":"disconnect"}""")
+            }
+        client.post("/bridge") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"target":{"platform":"desktop"},"operation":"getHierarchy"}""")
+        }
+
+        assertEquals(HttpStatusCode.OK, disconnectResponse.status)
+        assertEquals(2, connectCount)
     }
 }

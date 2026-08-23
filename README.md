@@ -23,7 +23,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
   already renders a hidden accessibility DOM for screen readers, and cmp-bridge drives
   that directly through a real headless browser (Playwright).
 
-Both platforms are exposed through the same interface, `BridgeDriver` — five
+Both platforms are exposed through the same interface, `BridgeDriver` — a core set of
 operations (`getHierarchy`, `click`, `setText`, `scroll`, `screenshot`) and one shared
 tree shape, `HierarchyNode`. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full
 breakdown, including where the two platforms' capabilities differ.
@@ -101,11 +101,9 @@ fun main() = application {
 ```
 
 `startIfEnabled` is a no-op unless the process is launched with `CMP_BRIDGE_ENABLED=true`
-(or `-DcmpBridge.enabled=true`), so this is safe to leave in a normal build. Prefer the
-env var when launching through something that forks a JVM — `./gradlew :app:run`, an
-IDE run configuration, etc. — since environment variables are inherited by a child
-process by default everywhere, unlike `-D` system properties, which aren't forwarded
-into a forked process unless whatever launched it explicitly does so.
+(or `-DcmpBridge.enabled=true`). Currently, the pattern we are using is to leave this capability in a normal build. 
+But in the future we will be looking for a way to make it opt-in at build time, so that the bridge code is not
+included in production builds. 
 
 **2. Tag the elements you want to drive or read**, the same way you would for any
 accessibility-based test tool:
@@ -141,11 +139,16 @@ CMP_BRIDGE_ENABLED=true ./gradlew :cmp-bridge-sample:run
 ```
 
 This opens the sample app with the bridge listening on `127.0.0.1:8901`. In another
-terminal, point the HTTP server at it:
+terminal, start the HTTP server — it doesn't take a target at launch, only requests do:
 
 ```bash
-./gradlew :cmp-bridge-http-server:run --args="--platform desktop"
-curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' -d '{"operation":"getHierarchy"}'
+./gradlew :cmp-bridge-http-server:run
+```
+
+In another terminal send a command to the server:
+```bash
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"target":{"platform":"desktop"},"operation":"getHierarchy"}'
 ```
 
 **Web**
@@ -154,10 +157,12 @@ curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' -d
 ./gradlew :cmp-bridge-sample:wasmJsBrowserDevelopmentRun
 ```
 
-Then, once the dev server is up:
+Then, once the dev server is up (using the same `cmp-bridge-http-server:run` command as
+above — the server's launch doesn't depend on platform):
 
 ```bash
-./gradlew :cmp-bridge-http-server:run --args="--platform web --url http://127.0.0.1:8080/"
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"target":{"platform":"web","url":"http://127.0.0.1:8080/"},"operation":"getHierarchy"}'
 ```
 
 There's no `curl`-equivalent quick check for the MCP path — MCP needs a real client
@@ -169,10 +174,19 @@ jar (`./gradlew :cmp-bridge-mcp-server:shadowJar`) and point an MCP client at it
 ## Driving an app over HTTP or MCP
 
 Both standalone servers wrap the same `BridgeDriver` core operations, plus the
-`waitForTag`/`waitForText` convenience helpers, and both work the same way: attach to an
-app (or wasmJs dev server) that already has its bridge armed, then talk to it over HTTP
-or MCP — pick whichever transport fits your tooling. Neither server ever launches the
-app itself.
+`waitForTag`/`waitForText` convenience helpers, and both work the same way: **one
+long-running server instance resolves its target app instance per request/tool
+call**, so it can drive any number of apps (or the same app across restarts) over its
+lifetime. Every request/call carries a `target` — `{"platform": "desktop"}` (optionally
+with `host`/`port`, defaulting to `127.0.0.1:8901`) or `{"platform": "web", "url":
+"..."}`.
+
+Resolving a target connects and caches a driver for it: cheap for desktop, but a web
+target launches a real headless browser via Playwright. That cached session closes
+automatically once it's been idle for `--max-idle-ms` (default 5 minutes) or alive for
+`--max-session-ms` (default 30 minutes), whichever comes first, or immediately via the
+`disconnect` operation/tool. Neither server launches the app itself — only attaches to
+one that's already running.
 
 **HTTP (`cmp-bridge-http-server`)**
 
@@ -183,17 +197,17 @@ app itself.
 2. **Build the fat jar** (once): `./gradlew :cmp-bridge-http-server:shadowJar` produces
    `cmp-bridge-http-server/build/libs/cmp-bridge-http-server-all.jar` — or grab it from a
    [GitHub Release](https://github.com/CRamsan/cmp-bridge/releases) instead of building.
-3. **Start it, pointing it at that app:**
+3. **Start it** — no target flags; it's ready to attach to any app a request names:
    ```bash
-   java -jar cmp-bridge-http-server-all.jar --platform desktop
-   # or, for web: --platform web --url http://127.0.0.1:8080/
+   java -jar cmp-bridge-http-server-all.jar
    ```
-   Run with `--help` for the full option list (`--host`/`--port` for desktop, `--url`
-   for web, plus `--server-port` for the HTTP server itself, default `8090`).
+   Run with `--help` for the full option list (`--server-port`, default `8090`, plus
+   `--max-idle-ms`/`--max-session-ms`, described above).
 4. **Send it requests.** It exposes every operation behind a single endpoint,
-   `POST /bridge` (on `--server-port`). The request body is an envelope —
-   `{"operation": "...", "payload": {...}}` — where `operation` picks the driver call and
-   `payload` is that operation's own arguments (omitted for the two that take none):
+   `POST /bridge`. The request body is an envelope — `{"target": {...}, "operation":
+   "...", "payload": {...}}` — where `target` picks the app instance, `operation` picks
+   the driver call, and `payload` is that operation's own arguments (omitted for the
+   ones that take none):
 
 | `operation` | `payload` | Description |
 |---|---|---|
@@ -204,25 +218,29 @@ app itself.
 | `screenshot` | — | The app's current frame as a PNG (binary response). |
 | `waitForTag` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag` appears, up to `timeoutMs` (default 15000); errors on timeout. |
 | `waitForText` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag`'s bounds settle and its text is non-null, up to `timeoutMs`; errors on timeout. |
+| `disconnect` | — | Ends this target's session early, closing its driver. A no-op if it has none. |
 
 ```bash
-curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' -d '{"operation":"getHierarchy"}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"operation":"click","payload":{"tag":"increment_button"}}'
+  -d '{"target":{"platform":"desktop"},"operation":"getHierarchy"}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"operation":"setText","payload":{"tag":"name_field","text":"Ada"}}'
+  -d '{"target":{"platform":"desktop"},"operation":"click","payload":{"tag":"increment_button"}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"operation":"scroll","payload":{"anchorTag":"item_list","deltaY":5}}'
+  -d '{"target":{"platform":"desktop"},"operation":"setText","payload":{"tag":"name_field","text":"Ada"}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"operation":"screenshot"}' -o screenshot.png
+  -d '{"target":{"platform":"desktop"},"operation":"scroll","payload":{"anchorTag":"item_list","deltaY":5}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"operation":"waitForTag","payload":{"tag":"greeting_text"}}'
+  -d '{"target":{"platform":"desktop"},"operation":"screenshot"}' -o screenshot.png
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"operation":"waitForText","payload":{"tag":"greeting_text"}}'
+  -d '{"target":{"platform":"desktop"},"operation":"waitForTag","payload":{"tag":"greeting_text"}}'
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"target":{"platform":"desktop"},"operation":"waitForText","payload":{"tag":"greeting_text"}}'
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"target":{"platform":"desktop"},"operation":"disconnect"}'
 ```
 
-A failed operation (unknown tag, timeout, an unrecognized `operation`, ...) comes back
-as `400` with `{"error": "..."}` rather than a stack trace.
+A failed operation (unknown tag, timeout, an unrecognized `operation`, an unresolvable
+target, ...) comes back as `400` with `{"error": "..."}` rather than a stack trace.
 
 **MCP (`cmp-bridge-mcp-server`)**
 
@@ -230,29 +248,31 @@ as `400` with `{"error": "..."}` rather than a stack trace.
 2. **Build the fat jar** (once): `./gradlew :cmp-bridge-mcp-server:shadowJar` produces
    `cmp-bridge-mcp-server/build/libs/cmp-bridge-mcp-server-all.jar` — or grab it from a
    [GitHub Release](https://github.com/CRamsan/cmp-bridge/releases) instead of building.
-3. **Point an MCP client at the jar**, passing the same `--platform`/`--host`/`--port`/
-   `--url` flags shown above, with a config like:
+3. **Point an MCP client at the jar** — no target flags either, with a config like:
    ```json
    {
      "mcpServers": {
        "cmp-bridge": {
          "command": "java",
-         "args": ["-jar", "/path/to/cmp-bridge-mcp-server-all.jar", "--platform", "desktop"]
+         "args": ["-jar", "/path/to/cmp-bridge-mcp-server-all.jar"]
        }
      }
    }
    ```
-4. **Call its tools** — it exposes the same operations as MCP tools over stdio:
+   `--max-idle-ms`/`--max-session-ms` can be appended to `args` the same way.
+4. **Call its tools** — every tool takes the target app instance (`platform`, plus
+   `host`/`port` or `url`) as arguments alongside its own:
 
    | Tool | Arguments |
    |---|---|
-   | `get_hierarchy` | — |
-   | `click` | `tag` |
-   | `set_text` | `tag`, `text` |
-   | `scroll` | `anchorTag`, `deltaY` |
-   | `screenshot` | — (returns an image, not text) |
-   | `wait_for_tag` | `tag`, `timeoutMs` (optional, default 15000) |
-   | `wait_for_text` | `tag`, `timeoutMs` (optional, default 15000) |
+   | `get_hierarchy` | `platform`, `host`/`port`/`url` |
+   | `click` | `platform`, `host`/`port`/`url`, `tag` |
+   | `set_text` | `platform`, `host`/`port`/`url`, `tag`, `text` |
+   | `scroll` | `platform`, `host`/`port`/`url`, `anchorTag`, `deltaY` |
+   | `screenshot` | `platform`, `host`/`port`/`url` (returns an image, not text) |
+   | `wait_for_tag` | `platform`, `host`/`port`/`url`, `tag`, `timeoutMs` (optional, default 15000) |
+   | `wait_for_text` | `platform`, `host`/`port`/`url`, `tag`, `timeoutMs` (optional, default 15000) |
+   | `disconnect` | `platform`, `host`/`port`/`url` — ends this target's session early |
 
 ## License
 

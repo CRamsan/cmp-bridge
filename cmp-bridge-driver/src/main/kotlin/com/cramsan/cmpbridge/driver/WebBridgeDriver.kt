@@ -8,6 +8,7 @@ import com.microsoft.playwright.Playwright
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -95,10 +96,16 @@ class WebBridgeDriver private constructor(
 
     companion object {
         private const val BRIDGE_TIMEOUT_MS = 30_000L
+        private const val CHROMIUM_INSTALL_TIMEOUT_MS = 300_000L
 
         /** Attaches to a wasmJs app that's already running at [url]. */
         fun connect(url: String): WebBridgeDriver {
-            val playwright = Playwright.create()
+            ensureChromiumInstalled()
+            // Playwright.create() would otherwise install its whole default browser set
+            // (Chromium, Firefox, WebKit) on first use — this driver only ever launches Chromium.
+            val createOptions =
+                Playwright.CreateOptions().setEnv(mapOf("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" to "1"))
+            val playwright = Playwright.create(createOptions)
             val launchOptions = BrowserType.LaunchOptions().setHeadless(true)
             resolveCachedChromiumExecutable()?.let { launchOptions.setExecutablePath(it) }
             val browser = playwright.chromium().launch(launchOptions)
@@ -112,6 +119,35 @@ class WebBridgeDriver private constructor(
                 Page.WaitForFunctionOptions().setTimeout(BRIDGE_TIMEOUT_MS.toDouble()),
             )
             return WebBridgeDriver(playwright, browser, page)
+        }
+
+        /**
+         * Installs Chromium alone (via Playwright's own CLI, in a separate JVM) if it isn't
+         * already cached. Left to its own default, Playwright installs its entire browser family
+         * (Chromium, Firefox, WebKit — hundreds of MiB) on first use even though this driver only
+         * ever launches Chromium; scoping the install to just it here avoids that, and pairs with
+         * `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` in [connect] so [Playwright.create] doesn't redo it.
+         */
+        private fun ensureChromiumInstalled() {
+            if (resolveCachedChromiumExecutable() != null) return
+            val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
+            val classpath = System.getProperty("java.class.path")
+            val logFile = File.createTempFile("cmp-bridge-playwright-install", ".log").apply { deleteOnExit() }
+            val process =
+                ProcessBuilder(javaBin, "-cp", classpath, "com.microsoft.playwright.CLI", "install", "chromium")
+                    .redirectErrorStream(true)
+                    .redirectOutput(logFile)
+                    .start()
+            val finished = process.waitFor(CHROMIUM_INSTALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            if (finished && process.exitValue() == 0) {
+                logFile.delete()
+                return
+            }
+            if (!finished) process.destroyForcibly()
+            error(
+                "Failed to install Chromium for Playwright within ${CHROMIUM_INSTALL_TIMEOUT_MS}ms\n" +
+                    "Log: ${logFile.absolutePath}",
+            )
         }
 
         /**

@@ -4,7 +4,8 @@
 
 package com.cramsan.cmpbridge.mcpserver
 
-import com.cramsan.cmpbridge.driver.BridgeDriver
+import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
+import com.cramsan.cmpbridge.driver.BridgeTarget
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
@@ -13,6 +14,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
@@ -23,37 +25,44 @@ import java.util.Base64
 private val json = Json { ignoreUnknownKeys = true }
 
 /**
- * Registers one MCP tool per [BridgeDriver] core operation, plus [BridgeDriver.waitForTag] and
- * [BridgeDriver.waitForText], on [server].
+ * Registers one MCP tool per [com.cramsan.cmpbridge.driver.BridgeDriver] core operation, plus
+ * `waitForTag`/`waitForText` and a `disconnect` operation to end a session early, on [server].
+ * Every tool takes the target app instance (`platform`, plus `host`/`port` or `url`) as arguments
+ * and resolves a driver for it via [registry] on each call — see [BridgeSessionRegistry] for how
+ * that's cached/evicted across calls.
  */
-fun Server.registerBridgeTools(driver: BridgeDriver) {
-    registerGetHierarchyTool(driver)
-    registerClickTool(driver)
-    registerSetTextTool(driver)
-    registerScrollTool(driver)
-    registerScreenshotTool(driver)
-    registerWaitForTagTool(driver)
-    registerWaitForTextTool(driver)
+fun Server.registerBridgeTools(registry: BridgeSessionRegistry) {
+    registerGetHierarchyTool(registry)
+    registerClickTool(registry)
+    registerSetTextTool(registry)
+    registerScrollTool(registry)
+    registerScreenshotTool(registry)
+    registerWaitForTagTool(registry)
+    registerWaitForTextTool(registry)
+    registerDisconnectTool(registry)
 }
 
-private fun Server.registerGetHierarchyTool(driver: BridgeDriver) {
+private fun Server.registerGetHierarchyTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "get_hierarchy",
         description = "Returns the app's current real UI semantics tree (roles, text, bounds, available actions).",
+        inputSchema = targetOnlySchema(),
     ) { request ->
         safeCall("get_hierarchy", request.arguments) {
+            val driver = registry.resolve(request.arguments.toBridgeTarget())
             CallToolResult(content = listOf(TextContent(text = json.encodeToString(driver.getHierarchy()))))
         }
     }
 }
 
-private fun Server.registerClickTool(driver: BridgeDriver) {
+private fun Server.registerClickTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "click",
         description = "Real synthetic click on the element with the given test tag.",
         inputSchema = stringPropertiesSchema("tag" to "The element's test tag"),
     ) { request ->
         safeCall("click", request.arguments) {
+            val driver = registry.resolve(request.arguments.toBridgeTarget())
             val tag = request.arguments.stringArg("tag")
             driver.click(tag)
             CallToolResult(content = listOf(TextContent(text = "Clicked \"$tag\".")))
@@ -61,13 +70,14 @@ private fun Server.registerClickTool(driver: BridgeDriver) {
     }
 }
 
-private fun Server.registerSetTextTool(driver: BridgeDriver) {
+private fun Server.registerSetTextTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "set_text",
         description = "Clicks the element with the given test tag, then types text into it.",
         inputSchema = stringPropertiesSchema("tag" to "The element's test tag", "text" to "The text to type"),
     ) { request ->
         safeCall("set_text", request.arguments) {
+            val driver = registry.resolve(request.arguments.toBridgeTarget())
             val tag = request.arguments.stringArg("tag")
             val text = request.arguments.stringArg("text")
             driver.setText(tag, text)
@@ -76,7 +86,7 @@ private fun Server.registerSetTextTool(driver: BridgeDriver) {
     }
 }
 
-private fun Server.registerScrollTool(driver: BridgeDriver) {
+private fun Server.registerScrollTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "scroll",
         description =
@@ -87,13 +97,15 @@ private fun Server.registerScrollTool(driver: BridgeDriver) {
         ToolSchema(
             properties =
             buildJsonObject {
+                putTargetProperties()
                 put("anchorTag", buildJsonObject { put("type", "string") })
                 put("deltaY", buildJsonObject { put("type", "integer") })
             },
-            required = listOf("anchorTag", "deltaY"),
+            required = listOf("platform", "anchorTag", "deltaY"),
         ),
     ) { request ->
         safeCall("scroll", request.arguments) {
+            val driver = registry.resolve(request.arguments.toBridgeTarget())
             val anchorTag = request.arguments.stringArg("anchorTag")
             val deltaY =
                 request.arguments
@@ -106,12 +118,14 @@ private fun Server.registerScrollTool(driver: BridgeDriver) {
     }
 }
 
-private fun Server.registerScreenshotTool(driver: BridgeDriver) {
+private fun Server.registerScreenshotTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "screenshot",
         description = "Captures a real screenshot of the app's current frame as a PNG image.",
+        inputSchema = targetOnlySchema(),
     ) { request ->
         safeCall("screenshot", request.arguments) {
+            val driver = registry.resolve(request.arguments.toBridgeTarget())
             val png = driver.screenshot()
             val image = ImageContent(data = Base64.getEncoder().encodeToString(png), mimeType = "image/png")
             CallToolResult(content = listOf(image))
@@ -119,7 +133,7 @@ private fun Server.registerScreenshotTool(driver: BridgeDriver) {
     }
 }
 
-private fun Server.registerWaitForTagTool(driver: BridgeDriver) {
+private fun Server.registerWaitForTagTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "wait_for_tag",
         description =
@@ -129,6 +143,7 @@ private fun Server.registerWaitForTagTool(driver: BridgeDriver) {
         inputSchema = tagAndTimeoutSchema(),
     ) { request ->
         safeCall("wait_for_tag", request.arguments) {
+            val driver = registry.resolve(request.arguments.toBridgeTarget())
             val tag = request.arguments.stringArg("tag")
             val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
             val node = if (timeoutMs != null) driver.waitForTag(tag, timeoutMs) else driver.waitForTag(tag)
@@ -137,7 +152,7 @@ private fun Server.registerWaitForTagTool(driver: BridgeDriver) {
     }
 }
 
-private fun Server.registerWaitForTextTool(driver: BridgeDriver) {
+private fun Server.registerWaitForTextTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "wait_for_text",
         description =
@@ -147,6 +162,7 @@ private fun Server.registerWaitForTextTool(driver: BridgeDriver) {
         inputSchema = tagAndTimeoutSchema(),
     ) { request ->
         safeCall("wait_for_text", request.arguments) {
+            val driver = registry.resolve(request.arguments.toBridgeTarget())
             val tag = request.arguments.stringArg("tag")
             val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
             val node = if (timeoutMs != null) driver.waitForText(tag, timeoutMs) else driver.waitForText(tag)
@@ -155,13 +171,71 @@ private fun Server.registerWaitForTextTool(driver: BridgeDriver) {
     }
 }
 
+private fun Server.registerDisconnectTool(registry: BridgeSessionRegistry) {
+    addTool(
+        name = "disconnect",
+        description =
+        "Ends a target's cached session early, closing its driver instead of waiting for it to " +
+            "idle out or hit its max session time. A no-op if there's no active session for it.",
+        inputSchema = targetOnlySchema(),
+    ) { request ->
+        safeCall("disconnect", request.arguments) {
+            registry.disconnect(request.arguments.toBridgeTarget())
+            CallToolResult(content = listOf(TextContent(text = "Disconnected.")))
+        }
+    }
+}
+
 /**
- * Shared input schema for [registerWaitForTagTool] and [registerWaitForTextTool]: a required
- * `tag` plus optional `timeoutMs`.
+ * The target app instance every tool call resolves a driver for: `platform` (`"desktop"` or
+ * `"web"`) is always required; `host`/`port` apply to desktop (defaulted like
+ * [com.cramsan.cmpbridge.driver.DesktopBridgeDriver.connect]'s own), `url` is required for web.
+ */
+private fun JsonObjectBuilder.putTargetProperties() {
+    put(
+        "platform",
+        buildJsonObject {
+            put("type", "string")
+            put("description", "\"desktop\" or \"web\"")
+        },
+    )
+    put(
+        "host",
+        buildJsonObject {
+            put("type", "string")
+            put("description", "Desktop bridge host (default 127.0.0.1)")
+        },
+    )
+    put(
+        "port",
+        buildJsonObject {
+            put("type", "integer")
+            put("description", "Desktop bridge port (default 8901)")
+        },
+    )
+    put(
+        "url",
+        buildJsonObject {
+            put("type", "string")
+            put("description", "URL of the already-running wasmJs dev server (required when platform is \"web\")")
+        },
+    )
+}
+
+/** Schema for a tool that takes no arguments beyond the target app instance. */
+private fun targetOnlySchema(): ToolSchema = ToolSchema(
+    properties = buildJsonObject { putTargetProperties() },
+    required = listOf("platform"),
+)
+
+/**
+ * Shared input schema for [registerWaitForTagTool] and [registerWaitForTextTool]: the target app
+ * instance, a required `tag`, plus optional `timeoutMs`.
  */
 private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
     properties =
     buildJsonObject {
+        putTargetProperties()
         put(
             "tag",
             buildJsonObject {
@@ -177,12 +251,13 @@ private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
             },
         )
     },
-    required = listOf("tag"),
+    required = listOf("platform", "tag"),
 )
 
 private fun stringPropertiesSchema(vararg properties: Pair<String, String>): ToolSchema = ToolSchema(
     properties =
     buildJsonObject {
+        putTargetProperties()
         properties.forEach { (name, description) ->
             put(
                 name,
@@ -193,16 +268,25 @@ private fun stringPropertiesSchema(vararg properties: Pair<String, String>): Too
             )
         }
     },
-    required = properties.map { it.first },
+    required = listOf("platform") + properties.map { it.first },
 )
 
 private fun JsonObject?.stringArg(name: String): String =
     this?.get(name)?.jsonPrimitive?.content ?: error("Missing \"$name\" argument")
 
+/** Parses the target fields (`platform`/`host`/`port`/`url`) every tool's arguments carry. */
+private fun JsonObject?.toBridgeTarget(): BridgeTarget = BridgeTarget(
+    platform = stringArg("platform"),
+    host = this?.get("host")?.jsonPrimitive?.content ?: "127.0.0.1",
+    port = this?.get("port")?.jsonPrimitive?.int ?: 8901,
+    url = this?.get("url")?.jsonPrimitive?.content,
+)
+
 /**
- * Converts a thrown [BridgeDriver] failure (unknown tag, timeout, ...) into an MCP tool-level
- * error rather than crashing the session, and logs [operation]/[arguments]/outcome to stderr
- * (stdout is reserved for the MCP JSON-RPC stream) so a session can be debugged after the fact.
+ * Converts a thrown [com.cramsan.cmpbridge.driver.BridgeDriver]/[BridgeSessionRegistry] failure
+ * (unknown tag, timeout, unresolvable target, ...) into an MCP tool-level error rather than
+ * crashing the session, and logs [operation]/[arguments]/outcome to stderr (stdout is reserved
+ * for the MCP JSON-RPC stream) so a session can be debugged after the fact.
  */
 @Suppress("TooGenericExceptionCaught")
 private suspend fun safeCall(
