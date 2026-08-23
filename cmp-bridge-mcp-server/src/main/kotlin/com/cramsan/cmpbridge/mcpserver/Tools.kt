@@ -40,8 +40,10 @@ private fun Server.registerGetHierarchyTool(driver: BridgeDriver) {
     addTool(
         name = "get_hierarchy",
         description = "Returns the app's current real UI semantics tree (roles, text, bounds, available actions).",
-    ) { _ ->
-        safeCall { CallToolResult(content = listOf(TextContent(text = json.encodeToString(driver.getHierarchy())))) }
+    ) { request ->
+        safeCall("get_hierarchy", request.arguments) {
+            CallToolResult(content = listOf(TextContent(text = json.encodeToString(driver.getHierarchy()))))
+        }
     }
 }
 
@@ -51,7 +53,7 @@ private fun Server.registerClickTool(driver: BridgeDriver) {
         description = "Real synthetic click on the element with the given test tag.",
         inputSchema = stringPropertiesSchema("tag" to "The element's test tag"),
     ) { request ->
-        safeCall {
+        safeCall("click", request.arguments) {
             val tag = request.arguments.stringArg("tag")
             driver.click(tag)
             CallToolResult(content = listOf(TextContent(text = "Clicked \"$tag\".")))
@@ -65,7 +67,7 @@ private fun Server.registerSetTextTool(driver: BridgeDriver) {
         description = "Clicks the element with the given test tag, then types text into it.",
         inputSchema = stringPropertiesSchema("tag" to "The element's test tag", "text" to "The text to type"),
     ) { request ->
-        safeCall {
+        safeCall("set_text", request.arguments) {
             val tag = request.arguments.stringArg("tag")
             val text = request.arguments.stringArg("text")
             driver.setText(tag, text)
@@ -91,7 +93,7 @@ private fun Server.registerScrollTool(driver: BridgeDriver) {
             required = listOf("anchorTag", "deltaY"),
         ),
     ) { request ->
-        safeCall {
+        safeCall("scroll", request.arguments) {
             val anchorTag = request.arguments.stringArg("anchorTag")
             val deltaY =
                 request.arguments
@@ -108,8 +110,8 @@ private fun Server.registerScreenshotTool(driver: BridgeDriver) {
     addTool(
         name = "screenshot",
         description = "Captures a real screenshot of the app's current frame as a PNG image.",
-    ) { _ ->
-        safeCall {
+    ) { request ->
+        safeCall("screenshot", request.arguments) {
             val png = driver.screenshot()
             val image = ImageContent(data = Base64.getEncoder().encodeToString(png), mimeType = "image/png")
             CallToolResult(content = listOf(image))
@@ -126,7 +128,7 @@ private fun Server.registerWaitForTagTool(driver: BridgeDriver) {
             "something to show up.",
         inputSchema = tagAndTimeoutSchema(),
     ) { request ->
-        safeCall {
+        safeCall("wait_for_tag", request.arguments) {
             val tag = request.arguments.stringArg("tag")
             val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
             val node = if (timeoutMs != null) driver.waitForTag(tag, timeoutMs) else driver.waitForTag(tag)
@@ -144,7 +146,7 @@ private fun Server.registerWaitForTextTool(driver: BridgeDriver) {
             "node's still-settling text, unlike a raw get_hierarchy call.",
         inputSchema = tagAndTimeoutSchema(),
     ) { request ->
-        safeCall {
+        safeCall("wait_for_text", request.arguments) {
             val tag = request.arguments.stringArg("tag")
             val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
             val node = if (timeoutMs != null) driver.waitForText(tag, timeoutMs) else driver.waitForText(tag)
@@ -199,14 +201,26 @@ private fun JsonObject?.stringArg(name: String): String =
 
 /**
  * Converts a thrown [BridgeDriver] failure (unknown tag, timeout, ...) into an MCP tool-level
- * error rather than crashing the session.
+ * error rather than crashing the session, and logs [operation]/[arguments]/outcome to stderr
+ * (stdout is reserved for the MCP JSON-RPC stream) so a session can be debugged after the fact.
  */
 @Suppress("TooGenericExceptionCaught")
-private suspend fun safeCall(block: suspend () -> CallToolResult): CallToolResult = try {
-    block()
-} catch (e: Exception) {
-    CallToolResult(
-        content = listOf(TextContent(text = e.message ?: e::class.simpleName ?: "Unknown error")),
-        isError = true,
-    )
+private suspend fun safeCall(
+    operation: String,
+    arguments: JsonObject?,
+    block: suspend () -> CallToolResult,
+): CallToolResult {
+    System.err.println("[cmp-bridge-mcp] -> $operation ${arguments ?: JsonObject(emptyMap())}")
+    return try {
+        val result = block()
+        System.err.println("[cmp-bridge-mcp] <- $operation ok")
+        result
+    } catch (e: Exception) {
+        val message = e.message ?: e::class.simpleName ?: "Unknown error"
+        System.err.println("[cmp-bridge-mcp] <- $operation failed: $message")
+        CallToolResult(
+            content = listOf(TextContent(text = message)),
+            isError = true,
+        )
+    }
 }
