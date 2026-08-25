@@ -1,8 +1,10 @@
 package com.cramsan.cmpbridge.httpserver
 
 import com.cramsan.cmpbridge.HierarchyNode
+import com.cramsan.cmpbridge.driver.BridgeConnectionException
 import com.cramsan.cmpbridge.driver.BridgeDriver
 import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
+import com.cramsan.cmpbridge.driver.UnknownTagException
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -18,6 +20,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private const val TEST_SESSION_LIMIT_MS = 3_600_000L
+
+/** A failure type the StatusPages block has no dedicated handler for, to exercise its 500 fallback. */
+private class UnmappedDriverFailure(message: String) : Exception(message)
 
 private val ROOT_NODE =
     HierarchyNode(
@@ -80,13 +85,15 @@ private class FakeBridgeDriver : BridgeDriver {
     var lastSetText: Pair<String, String>? = null
     var lastScroll: Pair<String, Int>? = null
     var shouldFailClick = false
+    var clickFailure: (() -> Nothing)? = null
     var tree: HierarchyNode = ROOT_NODE
     var closed = false
 
     override fun getHierarchy(): HierarchyNode = tree
 
     override fun click(tag: String) {
-        if (shouldFailClick) error("Unknown tag: $tag")
+        clickFailure?.invoke()
+        if (shouldFailClick) throw UnknownTagException("Unknown tag: $tag")
         lastClickTag = tag
     }
 
@@ -110,6 +117,12 @@ private fun testRegistry(driver: BridgeDriver) = BridgeSessionRegistry(
     maxIdleMs = TEST_SESSION_LIMIT_MS,
     maxSessionMs = TEST_SESSION_LIMIT_MS,
     connect = { driver },
+)
+
+/** A registry using the real default connect logic, to exercise its own target validation. */
+private fun defaultConnectRegistry() = BridgeSessionRegistry(
+    maxIdleMs = TEST_SESSION_LIMIT_MS,
+    maxSessionMs = TEST_SESSION_LIMIT_MS,
 )
 
 class RoutesTest {
@@ -198,7 +211,7 @@ class RoutesTest {
     }
 
     @Test
-    fun `POST bridge with click on a failing driver returns 400 with the error message`() = testApplication {
+    fun `POST bridge with click on an unknown tag returns 404 with the error message`() = testApplication {
         val driver = FakeBridgeDriver().apply { shouldFailClick = true }
         application { bridgeHttpModule(testRegistry(driver)) }
         val client = createClient { install(ContentNegotiation) { json() } }
@@ -209,8 +222,88 @@ class RoutesTest {
                 setBody("""{"target":{"platform":"desktop"},"operation":"click","payload":{"tag":"missing"}}""")
             }
 
-        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(HttpStatusCode.NotFound, response.status)
         assertTrue(response.bodyAsText().contains("Unknown tag"))
+    }
+
+    @Test
+    fun `POST bridge with click on a driver-level connection failure returns 503`() = testApplication {
+        val driver = FakeBridgeDriver().apply {
+            clickFailure = { throw BridgeConnectionException("Connection to the app failed") }
+        }
+        application { bridgeHttpModule(testRegistry(driver)) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"target":{"platform":"desktop"},"operation":"click","payload":{"tag":"my_tag"}}""")
+            }
+
+        assertEquals(HttpStatusCode.ServiceUnavailable, response.status)
+        assertTrue(response.bodyAsText().contains("Connection to the app failed"))
+    }
+
+    @Test
+    fun `POST bridge with an unexpected driver failure returns 500`() = testApplication {
+        val driver = FakeBridgeDriver().apply {
+            clickFailure = { throw UnmappedDriverFailure("boom") }
+        }
+        application { bridgeHttpModule(testRegistry(driver)) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"target":{"platform":"desktop"},"operation":"click","payload":{"tag":"my_tag"}}""")
+            }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        assertTrue(response.bodyAsText().contains("boom"))
+    }
+
+    @Test
+    fun `POST bridge with an unknown platform target returns 400`() = testApplication {
+        application { bridgeHttpModule(defaultConnectRegistry()) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"target":{"platform":"bogus"},"operation":"getHierarchy"}""")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertTrue(response.bodyAsText().contains("platform"))
+    }
+
+    @Test
+    fun `POST bridge with a web target missing url returns 400`() = testApplication {
+        application { bridgeHttpModule(defaultConnectRegistry()) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"target":{"platform":"web"},"operation":"getHierarchy"}""")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertTrue(response.bodyAsText().contains("url"))
+    }
+
+    @Test
+    fun `POST bridge with a malformed JSON body returns 400`() = testApplication {
+        application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""not json""")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
     }
 
     @Test
@@ -233,7 +326,7 @@ class RoutesTest {
     }
 
     @Test
-    fun `POST bridge with waitForTag on a tag that never appears returns 400 after the timeout`() = testApplication {
+    fun `POST bridge with waitForTag on a tag that never appears returns 504 after the timeout`() = testApplication {
         application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
@@ -246,7 +339,7 @@ class RoutesTest {
                 )
             }
 
-        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(HttpStatusCode.GatewayTimeout, response.status)
         assertTrue(response.bodyAsText().contains("did not appear"))
     }
 
@@ -270,7 +363,7 @@ class RoutesTest {
     }
 
     @Test
-    fun `POST bridge with waitForText on a tag whose text stays null returns 400 after the timeout`() =
+    fun `POST bridge with waitForText on a tag whose text stays null returns 504 after the timeout`() =
         testApplication {
             val driver = FakeBridgeDriver().apply { tree = SILENT_NODE }
             application { bridgeHttpModule(testRegistry(driver)) }
@@ -285,12 +378,12 @@ class RoutesTest {
                     )
                 }
 
-            assertEquals(HttpStatusCode.BadRequest, response.status)
+            assertEquals(HttpStatusCode.GatewayTimeout, response.status)
             assertTrue(response.bodyAsText().contains("never settled"))
         }
 
     @Test
-    fun `POST bridge with waitForText on a tag that never appears returns 400 after the timeout`() = testApplication {
+    fun `POST bridge with waitForText on a tag that never appears returns 504 after the timeout`() = testApplication {
         application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
@@ -303,7 +396,7 @@ class RoutesTest {
                 )
             }
 
-        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(HttpStatusCode.GatewayTimeout, response.status)
         assertTrue(response.bodyAsText().contains("never settled"))
     }
 

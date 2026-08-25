@@ -6,6 +6,7 @@ import com.cramsan.cmpbridge.HierarchyNode
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.Socket
@@ -20,19 +21,28 @@ private val json = Json { ignoreUnknownKeys = true }
  */
 class DesktopBridgeDriver private constructor(private val host: String, private val port: Int) : BridgeDriver {
     private fun send(command: BridgeCommand): BridgeResponse {
-        Socket(host, port).use { socket ->
-            val writer = PrintWriter(socket.getOutputStream(), true)
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
-            writer.println(json.encodeToString(command))
-            val line = reader.readLine() ?: error("No response for command: $command")
-            return json.decodeFromString(line)
+        try {
+            Socket(host, port).use { socket ->
+                val writer = PrintWriter(socket.getOutputStream(), true)
+                val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+                writer.println(json.encodeToString(command))
+                val line = reader.readLine()
+                    ?: throw BridgeConnectionException("No response for command: $command")
+                return json.decodeFromString(line)
+            }
+        } catch (e: IOException) {
+            throw BridgeConnectionException(e.message ?: "Connection to the app failed", e)
         }
     }
 
     /** Sends [command], unwrapping the response to [T] or throwing (with the server's own message, if any). */
     private inline fun <reified T : BridgeResponse> sendTyped(command: BridgeCommand): T {
         val response = send(command)
-        if (response is BridgeResponse.Failure) error(response.message)
+        if (response is BridgeResponse.Failure) {
+            // DesktopBridgeServer.unknownTag() is the single source of this exact prefix.
+            if (response.message.startsWith(UNKNOWN_TAG_PREFIX)) throw UnknownTagException(response.message)
+            error(response.message)
+        }
         return response as? T ?: error("Unexpected response $response for command $command")
     }
 
@@ -63,6 +73,9 @@ class DesktopBridgeDriver private constructor(private val host: String, private 
         private const val CONNECT_TIMEOUT_MS = 10_000L
         private const val POLL_INTERVAL_MS = 250L
 
+        /** The exact prefix `DesktopBridgeServer.unknownTag()` always emits for a missing tag. */
+        private const val UNKNOWN_TAG_PREFIX = "Unknown tag: "
+
         /** Attaches to an app instance that's already running with the bridge armed. */
         fun connect(host: String = "127.0.0.1", port: Int = 8901): DesktopBridgeDriver {
             waitUntilConnectable(host, port)
@@ -79,7 +92,7 @@ class DesktopBridgeDriver private constructor(private val host: String, private 
                     Thread.sleep(POLL_INTERVAL_MS)
                 }
             }
-            error(
+            throw BridgeConnectionException(
                 "Could not connect to a UI test bridge at $host:$port within ${CONNECT_TIMEOUT_MS}ms — " +
                     "is the app running with CMP_BRIDGE_ENABLED=true (or -DcmpBridge.enabled=true)?",
             )
