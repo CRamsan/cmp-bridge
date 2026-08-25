@@ -174,7 +174,7 @@ jar (`./gradlew :cmp-bridge-mcp-server:shadowJar`) and point an MCP client at it
 ## Driving an app over HTTP or MCP
 
 Both standalone servers wrap the same `BridgeDriver` core operations, plus the
-`waitForTag`/`waitForText`/`waitForTagGone` convenience helpers, and both work the same way: **one
+`waitForTagVisibility`/`waitForText` convenience helpers, and both work the same way: **one
 long-running server instance resolves its target app instance per request/tool
 call**, so it can drive any number of apps (or the same app across restarts) over its
 lifetime. Every request/call carries a `target` — `{"platform": "desktop"}` (optionally
@@ -216,9 +216,8 @@ one that's already running.
 | `setText` | `{"tag": "...", "text": "..."}` | Clicks the element, selects any existing content, and replaces it with `text` (`""` clears it). |
 | `scroll` | `{"anchorTag": "...", "deltaY": N}` | Scroll gesture centered on `anchorTag`'s bounds. |
 | `screenshot` | — | The app's current frame as a PNG (binary response). |
-| `waitForTag` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag` appears, up to `timeoutMs` (default 15000); errors on timeout. |
+| `waitForTagVisibility` | `{"tag": "...", "visibility": "VISIBLE"|"GONE", "timeoutMs": N}` | Polls until `tag`'s existence matches `visibility`, up to `timeoutMs`; errors on timeout. `VISIBLE` is for a new tag appearing; `GONE` is for "same screen, state changed" cases like a success banner or dialog closing. Returns the node for `VISIBLE`, no body for `GONE`. |
 | `waitForText` | `{"tag": "...", "comparator": {...}, "timeoutMs": N}` | Polls until `tag`'s settled text satisfies `comparator`, up to `timeoutMs`; errors on timeout. For "same screen, state changed" assertions — inline validation errors, toggled badges — that a click's own async state update may not have applied yet, not just a new tag appearing. |
-| `waitForTagGone` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag` is no longer found, up to `timeoutMs`; errors on timeout. A no-op if it's already gone. Covers a success banner or dialog closing, the same way `waitForText` covers a text change. |
 | `disconnect` | — | Ends this target's session early, closing its driver. A no-op if it has none. |
 
 `waitForText`'s `comparator` is one of four shapes, matched against the tag's settled (non-null) text:
@@ -242,13 +241,13 @@ curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"target":{"platform":"desktop"},"operation":"screenshot"}' -o screenshot.png
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"target":{"platform":"desktop"},"operation":"waitForTag","payload":{"tag":"greeting_text"}}'
+  -d '{"target":{"platform":"desktop"},"operation":"waitForTagVisibility","payload":{"tag":"greeting_text","visibility":"VISIBLE"}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"target":{"platform":"desktop"},"operation":"waitForText","payload":{"tag":"greeting_text","comparator":{"type":"present"}}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"target":{"platform":"desktop"},"operation":"waitForText","payload":{"tag":"greeting_text","comparator":{"type":"equals","value":"Hello, Ada!"}}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"target":{"platform":"desktop"},"operation":"waitForTagGone","payload":{"tag":"loading_spinner"}}'
+  -d '{"target":{"platform":"desktop"},"operation":"waitForTagVisibility","payload":{"tag":"loading_spinner","visibility":"GONE"}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"target":{"platform":"desktop"},"operation":"disconnect"}'
 ```
@@ -261,7 +260,7 @@ that reflects what went wrong:
 | `400` | The request itself is at fault: malformed JSON, an unrecognized `operation`, or an invalid target (unknown `platform`, missing `url` for `web`). |
 | `404` | The targeted tag doesn't exist right now (`click`/`setText`/`scroll`). |
 | `503` | The driver couldn't reach or stay connected to the app (socket refused/reset, browser crashed, Chromium still installing). |
-| `504` | `waitForTag`/`waitForText`/`waitForTagGone` exceeded their timeout. |
+| `504` | `waitForTagVisibility`/`waitForText` exceeded their timeout. |
 | `500` | An unexpected failure not covered above. |
 
 **MCP (`cmp-bridge-mcp-server`)**
@@ -292,8 +291,8 @@ that reflects what went wrong:
    | `set_text` | `platform`, `host`/`port`/`url`, `tag`, `text` |
    | `scroll` | `platform`, `host`/`port`/`url`, `anchorTag`, `deltaY` |
    | `screenshot` | `platform`, `host`/`port`/`url` (returns an image, not text) |
-   | `wait_for_tag` | `platform`, `host`/`port`/`url`, `tag`, `timeoutMs` (optional, default 15000) |
-   | `wait_for_text` | `platform`, `host`/`port`/`url`, `tag`, `timeoutMs` (optional, default 15000) |
+   | `wait_for_tag_visibility` | `platform`, `host`/`port`/`url`, `tag`, `visibility` (`"VISIBLE"` or `"GONE"`), `timeoutMs` (optional, default 15000) |
+   | `wait_for_text` | `platform`, `host`/`port`/`url`, `tag`, `comparator` (`{"type": "present"\|"empty"\|"equals"\|"startsWith", ...}`), `timeoutMs` (optional, default 15000) |
    | `disconnect` | `platform`, `host`/`port`/`url` — ends this target's session early |
 
 ## License

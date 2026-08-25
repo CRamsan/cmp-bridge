@@ -14,14 +14,24 @@ interface BridgeDriver : AutoCloseable {
     /** Returns the node tagged [tag], or `null` if absent or its layout hasn't settled yet. */
     fun getBounds(tag: String): HierarchyNode? = getHierarchy().find(tag)?.takeIf { it.width > 0f && it.height > 0f }
 
-    /** Blocks until [tag] appears, up to [timeoutMs], by repeatedly re-fetching the hierarchy. */
-    fun waitForTag(tag: String, timeoutMs: Long = 15_000): HierarchyNode {
+    /**
+     * Blocks until [tag]'s existence matches [visibility], up to [timeoutMs], by repeatedly
+     * re-fetching the hierarchy — [TagVisibility.VISIBLE] for "a new tag appeared" (e.g. after a
+     * navigation), [TagVisibility.GONE] for "same screen, state changed" cases like a success
+     * banner or dialog closing (the same class of race [waitForText] closes for a text change).
+     * Returns the node when [visibility] is `VISIBLE`, `null` when it's `GONE`.
+     */
+    fun waitForTagVisibility(tag: String, visibility: TagVisibility, timeoutMs: Long = 15_000): HierarchyNode? {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            getBounds(tag)?.let { return it }
+            val node = getBounds(tag)
+            when (visibility) {
+                TagVisibility.VISIBLE -> if (node != null) return node
+                TagVisibility.GONE -> if (node == null) return null
+            }
             Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
         }
-        throw BridgeTimeoutException("Tag \"$tag\" did not appear within ${timeoutMs}ms")
+        throw BridgeTimeoutException("Tag \"$tag\" never reached visibility $visibility within ${timeoutMs}ms")
     }
 
     /**
@@ -45,20 +55,6 @@ interface BridgeDriver : AutoCloseable {
         throw BridgeTimeoutException("Tag \"$tag\" never satisfied $comparator within ${timeoutMs}ms")
     }
 
-    /**
-     * Blocks until [tag] is no longer found, up to [timeoutMs] — a no-op if it's already gone.
-     * Covers "same screen, state changed" cases like a success banner or dialog closing, the same
-     * way [waitForText] covers a text change.
-     */
-    fun waitForTagGone(tag: String, timeoutMs: Long = 15_000) {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            if (getBounds(tag) == null) return
-            Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
-        }
-        throw BridgeTimeoutException("Tag \"$tag\" was still present after ${timeoutMs}ms")
-    }
-
     /** Clicks the node tagged [tag] via a real synthetic input event. */
     fun click(tag: String)
 
@@ -67,7 +63,8 @@ interface BridgeDriver : AutoCloseable {
 
     /**
      * Scrolls near [anchorTag] by [deltaY], in the platform's native scroll units (not equivalent
-     * across platforms — poll via [waitForTag]/[getBounds] rather than relying on a fixed distance).
+     * across platforms — poll via [waitForTagVisibility]/[getBounds] rather than relying on a
+     * fixed distance).
      */
     fun scroll(anchorTag: String, deltaY: Int)
 

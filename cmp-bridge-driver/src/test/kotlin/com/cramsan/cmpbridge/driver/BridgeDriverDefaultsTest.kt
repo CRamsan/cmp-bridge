@@ -99,11 +99,14 @@ private class EventuallyChangesDriver(
 
 class BridgeDriverDefaultsTest {
     @Test
-    fun `waitForTag throws BridgeTimeoutException when the tag never appears`() {
+    fun `waitForTagVisibility with VISIBLE throws BridgeTimeoutException when the tag never appears`() {
         val driver = NeverAppearsDriver()
-        val error = runCatching { driver.waitForTag("my_tag", timeoutMs = 200) }.exceptionOrNull()
+        val error =
+            runCatching {
+                driver.waitForTagVisibility("my_tag", TagVisibility.VISIBLE, timeoutMs = 200)
+            }.exceptionOrNull()
         assertTrue(error is BridgeTimeoutException)
-        assertTrue(error.message.orEmpty().contains("did not appear"))
+        assertTrue(error.message.orEmpty().contains("never reached visibility"))
     }
 
     @Test
@@ -132,10 +135,10 @@ class BridgeDriverDefaultsTest {
     }
 
     @Test
-    fun `waitForTag returns once the tag appears`() {
+    fun `waitForTagVisibility with VISIBLE returns once the tag appears`() {
         val driver = TextNeverSettlesDriver()
-        val node = driver.waitForTag("my_tag", timeoutMs = 200)
-        assertEquals("my_tag", node.testTag)
+        val node = driver.waitForTagVisibility("my_tag", TagVisibility.VISIBLE, timeoutMs = 200)
+        assertEquals("my_tag", node?.testTag)
     }
 
     @Test
@@ -181,22 +184,27 @@ class BridgeDriverDefaultsTest {
     }
 
     @Test
-    fun `waitForTagGone throws BridgeTimeoutException when the tag never disappears`() {
+    fun `waitForTagVisibility with GONE throws BridgeTimeoutException when the tag never disappears`() {
         val driver = FixedTextDriver(text = "still here")
-        val error = runCatching { driver.waitForTagGone("my_tag", timeoutMs = 200) }.exceptionOrNull()
+        val error =
+            runCatching {
+                driver.waitForTagVisibility("my_tag", TagVisibility.GONE, timeoutMs = 200)
+            }.exceptionOrNull()
         assertTrue(error is BridgeTimeoutException)
-        assertTrue(error.message.orEmpty().contains("still present"))
+        assertTrue(error.message.orEmpty().contains("never reached visibility"))
     }
 
     @Test
-    fun `waitForTagGone returns once the tag is no longer found`() {
+    fun `waitForTagVisibility with GONE returns null once the tag is no longer found`() {
         val driver = EventuallyChangesDriver(TAGGED_NODE_EXPECTED_TEXT, EMPTY_ROOT, flipAfterCalls = 2)
-        driver.waitForTagGone("my_tag", timeoutMs = 1_000)
+        val node = driver.waitForTagVisibility("my_tag", TagVisibility.GONE, timeoutMs = 1_000)
+        assertEquals(null, node)
     }
 
     @Test
-    fun `waitForTagGone returns immediately when the tag was never present`() {
+    fun `waitForTagVisibility with GONE returns null immediately when the tag was never present`() {
         val driver = NeverAppearsDriver()
-        driver.waitForTagGone("my_tag", timeoutMs = 200)
+        val node = driver.waitForTagVisibility("my_tag", TagVisibility.GONE, timeoutMs = 200)
+        assertEquals(null, node)
     }
 }

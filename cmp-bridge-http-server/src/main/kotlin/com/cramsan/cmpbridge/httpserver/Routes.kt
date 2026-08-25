@@ -6,6 +6,7 @@ import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
 import com.cramsan.cmpbridge.driver.BridgeTarget
 import com.cramsan.cmpbridge.driver.BridgeTimeoutException
 import com.cramsan.cmpbridge.driver.InvalidTargetException
+import com.cramsan.cmpbridge.driver.TagVisibility
 import com.cramsan.cmpbridge.driver.TextComparator
 import com.cramsan.cmpbridge.driver.UnknownTagException
 import io.ktor.http.ContentType
@@ -42,9 +43,9 @@ private suspend fun respondError(call: ApplicationCall, status: HttpStatusCode, 
  * Envelope every request to `/bridge` is wrapped in: [target] selects which app instance to
  * attach to (resolved/cached via [BridgeSessionRegistry] — see there for eviction rules),
  * [operation] selects the [BridgeDriver] call to make (`"getHierarchy"`, `"click"`, `"setText"`,
- * `"scroll"`, `"screenshot"`, `"waitForTag"`, `"waitForText"`, `"waitForTagGone"`, or
- * `"disconnect"` to end the target's session early), and [payload] is decoded into that
- * operation's own argument type. Absent for operations that take none.
+ * `"scroll"`, `"screenshot"`, `"waitForTagVisibility"`, `"waitForText"`, or `"disconnect"` to end
+ * the target's session early), and [payload] is decoded into that operation's own argument type.
+ * Absent for operations that take none.
  */
 @Serializable
 private data class BridgeRequest(val target: BridgeTarget, val operation: String, val payload: JsonElement = JsonNull)
@@ -58,9 +59,13 @@ private data class SetTextPayload(val tag: String, val text: String)
 @Serializable
 private data class ScrollPayload(val anchorTag: String, val deltaY: Int)
 
-/** [timeoutMs] mirrors [BridgeDriver.waitForTag]'s own default. */
+/** [timeoutMs] mirrors [BridgeDriver.waitForTagVisibility]'s own default; [visibility] is required. */
 @Serializable
-private data class WaitForTagPayload(val tag: String, val timeoutMs: Long = 15_000)
+private data class WaitForTagVisibilityPayload(
+    val tag: String,
+    val visibility: TagVisibility,
+    val timeoutMs: Long = 15_000,
+)
 
 /** [timeoutMs] mirrors [BridgeDriver.waitForText]'s own default; [comparator] is required. */
 @Serializable
@@ -69,13 +74,12 @@ private data class WaitForTextPayload(val tag: String, val comparator: TextCompa
 private val payloadJson = Json { ignoreUnknownKeys = true }
 
 /**
- * Wires [BridgeDriver]'s five core operations, plus the [BridgeDriver.waitForTag],
- * [BridgeDriver.waitForText], and [BridgeDriver.waitForTagGone] convenience helpers and a
- * `disconnect` operation to end a session early, up behind a single endpoint, `POST /bridge`,
- * dispatched on the request body's `operation` field — e.g. `{"target": {"platform": "desktop"},
- * "operation": "setText", "payload": {"tag": "...", "text": "..."}}`. [registry] resolves `target`
- * to a driver per request (connecting and caching lazily) — a thin adapter only, no business logic
- * of its own beyond that resolution.
+ * Wires [BridgeDriver]'s five core operations, plus the [BridgeDriver.waitForTagVisibility] and
+ * [BridgeDriver.waitForText] convenience helpers and a `disconnect` operation to end a session
+ * early, up behind a single endpoint, `POST /bridge`, dispatched on the request body's `operation`
+ * field — e.g. `{"target": {"platform": "desktop"}, "operation": "setText", "payload": {"tag":
+ * "...", "text": "..."}}`. [registry] resolves `target` to a driver per request (connecting and
+ * caching lazily) — a thin adapter only, no business logic of its own beyond that resolution.
  */
 fun Application.bridgeHttpModule(registry: BridgeSessionRegistry) {
     install(CallLogging)
@@ -140,20 +144,15 @@ private suspend fun handleBridgeRequest(call: ApplicationCall, registry: BridgeS
 
             "screenshot" -> call.respondBytes(driver.screenshot(), ContentType.Image.PNG)
 
-            "waitForTag" -> {
-                val payload = payloadJson.decodeFromJsonElement<WaitForTagPayload>(request.payload)
-                call.respond(driver.waitForTag(payload.tag, payload.timeoutMs))
+            "waitForTagVisibility" -> {
+                val payload = payloadJson.decodeFromJsonElement<WaitForTagVisibilityPayload>(request.payload)
+                val node = driver.waitForTagVisibility(payload.tag, payload.visibility, payload.timeoutMs)
+                if (node != null) call.respond(node) else call.respond(HttpStatusCode.OK)
             }
 
             "waitForText" -> {
                 val payload = payloadJson.decodeFromJsonElement<WaitForTextPayload>(request.payload)
                 call.respond(driver.waitForText(payload.tag, payload.comparator, payload.timeoutMs))
-            }
-
-            "waitForTagGone" -> {
-                val payload = payloadJson.decodeFromJsonElement<WaitForTagPayload>(request.payload)
-                driver.waitForTagGone(payload.tag, payload.timeoutMs)
-                call.respond(HttpStatusCode.OK)
             }
 
             else -> throw IllegalArgumentException("Unknown operation \"${request.operation}\"")

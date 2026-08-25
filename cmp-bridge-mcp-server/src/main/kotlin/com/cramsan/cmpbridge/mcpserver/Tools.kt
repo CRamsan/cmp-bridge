@@ -6,6 +6,7 @@ package com.cramsan.cmpbridge.mcpserver
 
 import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
 import com.cramsan.cmpbridge.driver.BridgeTarget
+import com.cramsan.cmpbridge.driver.TagVisibility
 import com.cramsan.cmpbridge.driver.TextComparator
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
@@ -31,10 +32,10 @@ private val json = Json { ignoreUnknownKeys = true }
 
 /**
  * Registers one MCP tool per [com.cramsan.cmpbridge.driver.BridgeDriver] core operation, plus
- * `waitForTag`/`waitForText`/`waitForTagGone` and a `disconnect` operation to end a session early,
- * on [server]. Every tool takes the target app instance (`platform`, plus `host`/`port` or `url`)
- * as arguments and resolves a driver for it via [registry] on each call — see
- * [BridgeSessionRegistry] for how that's cached/evicted across calls.
+ * `waitForTagVisibility`/`waitForText` and a `disconnect` operation to end a session early, on
+ * [server]. Every tool takes the target app instance (`platform`, plus `host`/`port` or `url`) as
+ * arguments and resolves a driver for it via [registry] on each call — see [BridgeSessionRegistry]
+ * for how that's cached/evicted across calls.
  */
 fun Server.registerBridgeTools(registry: BridgeSessionRegistry) {
     registerGetHierarchyTool(registry)
@@ -42,9 +43,8 @@ fun Server.registerBridgeTools(registry: BridgeSessionRegistry) {
     registerSetTextTool(registry)
     registerScrollTool(registry)
     registerScreenshotTool(registry)
-    registerWaitForTagTool(registry)
+    registerWaitForTagVisibilityTool(registry)
     registerWaitForTextTool(registry)
-    registerWaitForTagGoneTool(registry)
     registerDisconnectTool(registry)
 }
 
@@ -140,20 +140,28 @@ private fun Server.registerScreenshotTool(registry: BridgeSessionRegistry) {
     }
 }
 
-private fun Server.registerWaitForTagTool(registry: BridgeSessionRegistry) {
+private fun Server.registerWaitForTagVisibilityTool(registry: BridgeSessionRegistry) {
     addTool(
-        name = "wait_for_tag",
+        name = "wait_for_tag_visibility",
         description =
-        "Polls the app's UI tree until the element with the given test tag appears (or errors " +
-            "on timeout), instead of repeatedly calling get_hierarchy yourself while waiting for " +
-            "something to show up.",
-        inputSchema = tagAndTimeoutSchema(),
+        "Polls the app's UI tree until the element with the given test tag's existence matches " +
+            "visibility (or errors on timeout). VISIBLE is for \"a new tag appeared\" (e.g. after " +
+            "a navigation), instead of repeatedly calling get_hierarchy yourself while waiting " +
+            "for something to show up. GONE is for \"same screen, state changed\" cases like a " +
+            "success banner or dialog closing, the same way wait_for_text covers a text change.",
+        inputSchema = waitForTagVisibilitySchema(),
     ) { request ->
-        safeCall("wait_for_tag", request.arguments) {
+        safeCall("wait_for_tag_visibility", request.arguments) {
             val driver = registry.resolve(request.arguments.toBridgeTarget())
             val tag = request.arguments.stringArg("tag")
+            val visibility = TagVisibility.valueOf(request.arguments.stringArg("visibility"))
             val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
-            val node = if (timeoutMs != null) driver.waitForTag(tag, timeoutMs) else driver.waitForTag(tag)
+            val node =
+                if (timeoutMs != null) {
+                    driver.waitForTagVisibility(tag, visibility, timeoutMs)
+                } else {
+                    driver.waitForTagVisibility(tag, visibility)
+                }
             CallToolResult(content = listOf(TextContent(text = json.encodeToString(node))))
         }
     }
@@ -186,26 +194,6 @@ private fun Server.registerWaitForTextTool(registry: BridgeSessionRegistry) {
                     driver.waitForText(tag, comparator)
                 }
             CallToolResult(content = listOf(TextContent(text = json.encodeToString(node))))
-        }
-    }
-}
-
-private fun Server.registerWaitForTagGoneTool(registry: BridgeSessionRegistry) {
-    addTool(
-        name = "wait_for_tag_gone",
-        description =
-        "Polls the app's UI tree until the element with the given test tag is no longer found " +
-            "(or errors on timeout) — a no-op if it's already gone. Covers \"same screen, state " +
-            "changed\" cases like a success banner or dialog closing, the same way wait_for_text " +
-            "covers a text change.",
-        inputSchema = tagAndTimeoutSchema(),
-    ) { request ->
-        safeCall("wait_for_tag_gone", request.arguments) {
-            val driver = registry.resolve(request.arguments.toBridgeTarget())
-            val tag = request.arguments.stringArg("tag")
-            val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
-            if (timeoutMs != null) driver.waitForTagGone(tag, timeoutMs) else driver.waitForTagGone(tag)
-            CallToolResult(content = listOf(TextContent(text = "Tag \"$tag\" is gone.")))
         }
     }
 }
@@ -268,11 +256,10 @@ private fun targetOnlySchema(): ToolSchema = ToolSchema(
 )
 
 /**
- * Shared input schema for [registerWaitForTagTool], [registerWaitForTextTool], and
- * [registerWaitForTagGoneTool]: the target app instance, a required `tag`, plus optional
- * `timeoutMs`.
+ * Input schema for [registerWaitForTagVisibilityTool]: the target app instance, a required `tag`
+ * and `visibility` (matching [TagVisibility]'s own entry names), plus optional `timeoutMs`.
  */
-private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
+private fun waitForTagVisibilitySchema(): ToolSchema = ToolSchema(
     properties =
     buildJsonObject {
         putTargetProperties()
@@ -284,6 +271,14 @@ private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
             },
         )
         put(
+            "visibility",
+            buildJsonObject {
+                put("type", "string")
+                put("enum", JsonArray(listOf(JsonPrimitive("VISIBLE"), JsonPrimitive("GONE"))))
+                put("description", "VISIBLE to wait for the tag to appear, GONE to wait for it to disappear")
+            },
+        )
+        put(
             "timeoutMs",
             buildJsonObject {
                 put("type", "integer")
@@ -291,7 +286,7 @@ private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
             },
         )
     },
-    required = listOf("platform", "tag"),
+    required = listOf("platform", "tag", "visibility"),
 )
 
 /**

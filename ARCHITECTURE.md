@@ -116,11 +116,12 @@ from ARIA role, and a couple of known gaps are called out where they bite (see
 ### `BridgeDriver`: the common interface
 
 `BridgeDriver` (`cmp-bridge-driver/BridgeDriver.kt`) is the seam everything above the
-transport layer is written against: `getHierarchy`, `getBounds`/`waitForTag`/`waitForText`/
-`waitForTagGone` (default methods built on `getHierarchy`; `waitForText` takes a
-`TextComparator` — `Present`/`Empty`/`Equals`/`StartsWith` — matched against a tag's
-settled text), `click`, `setText`, `scroll`, `screenshot`, and `close` (`AutoCloseable`).
-`DesktopBridgeDriver` and `WebBridgeDriver` are its only two
+transport layer is written against: `getHierarchy`, `getBounds`/`waitForTagVisibility`/
+`waitForText` (default methods built on `getHierarchy`; `waitForTagVisibility` takes a
+`TagVisibility` — `VISIBLE`/`GONE` — and `waitForText` takes a `TextComparator` —
+`Present`/`Empty`/`Equals`/`StartsWith` — matched against a tag's settled text), `click`,
+`setText`, `scroll`, `screenshot`, and `close` (`AutoCloseable`). `DesktopBridgeDriver`
+and `WebBridgeDriver` are its only two
 implementations. Everything downstream — the HTTP server, the MCP server, an app's own
 test code — is written against this interface, not against either platform's transport.
 
@@ -149,9 +150,9 @@ same `BridgeDriver` implementations serve both.
 is one long-running process that resolves its target app instance **per
 request/tool-call**, so a single running instance can drive any number of apps over its
 lifetime. Both adapt the same `BridgeDriver` core operations, plus the
-`waitForTag`/`waitForText`/`waitForTagGone` convenience helpers and a `disconnect`
-operation, to a different transport. Neither ever launches an app — both only attach to
-one that's already running with the bridge armed (or a wasmJs dev server already up).
+`waitForTagVisibility`/`waitForText` convenience helpers and a `disconnect` operation, to
+a different transport. Neither ever launches an app — both only attach to one that's
+already running with the bridge armed (or a wasmJs dev server already up).
 
 ### `BridgeSessionRegistry`: resolving a target per call
 
@@ -190,7 +191,8 @@ interface itself, and is shared identically by both servers.
   the session-limit flags (`SessionOptions`, duplicated verbatim in `cmp-bridge-mcp-server`).
 - **`cmp-bridge-mcp-server`**: MCP over stdio (`kotlin-sdk`), one tool per driver
   operation (`get_hierarchy`, `click`, `set_text`, `scroll`, `screenshot`,
-  `wait_for_tag`, `wait_for_text`) plus `disconnect`, registered in `Tools.kt`. Every
+  `wait_for_tag_visibility`, `wait_for_text`) plus `disconnect`, registered in
+  `Tools.kt`. Every
   tool's input schema carries the target fields (`platform`/`host`/`port`/`url`)
   alongside its own arguments — `safeCall` resolves a driver from them via the registry
   before doing anything else. Because the MCP JSON-RPC stream *is* stdout, `main`
