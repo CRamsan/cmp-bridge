@@ -42,6 +42,19 @@ class DemoScenarioTest {
             d.setText("name_field", "Ada")
             assertEquals("Hello, Ada!", d.waitForTextEquals("greeting_text", "Hello, Ada!"))
 
+            // setText must replace a field's existing content, not paste at the cursor on top of
+            // it (issue #7) — this would settle on "Hello, AdaGrace!" if it regressed. Longer
+            // pre-existing text (matching the issue's own repro shape, "Gonzalez") lands a center
+            // click mid-text rather than past its end. setTextUntilText retries like
+            // clickUntilText does — synthetic AWT input delivery here is occasionally flaky
+            // independent of this fix (see clickUntilText's own doc).
+            d.setTextUntilText("name_field", "Grace", "greeting_text", "Hello, Grace!")
+            d.setTextUntilText("name_field", "Gonzalez", "greeting_text", "Hello, Gonzalez!")
+
+            // Exact repro from issue #7: clearing via setText(tag, "") must reset to empty, not
+            // be a no-op (pasting an empty clipboard inserts nothing at a bare cursor position).
+            d.setTextUntilText("name_field", "", "greeting_text", "Hello, stranger!")
+
             // Scroll units aren't equivalent across platforms (BridgeDriver.scroll's own doc) —
             // poll for the target row to appear rather than trust a fixed deltaY to land it.
             val targetTag = "item_${ITEM_COUNT - 1}"
@@ -129,6 +142,30 @@ class DemoScenarioTest {
     ) {
         repeat(maxAttempts) { attempt ->
             click(clickTag)
+            try {
+                waitForTextEquals(readTag, expected, timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
+                return
+            } catch (e: IllegalStateException) {
+                if (attempt == maxAttempts - 1) throw e
+            }
+        }
+    }
+
+    /**
+     * Calls [BridgeDriver.setText] on [tag], re-sending up to [maxAttempts] times until [readTag]
+     * shows [expected] — mirrors [clickUntilText]'s own retry for the same reason: synthetic AWT
+     * input delivery here occasionally needs a retry independent of whether the operation itself
+     * is correct.
+     */
+    private fun BridgeDriver.setTextUntilText(
+        tag: String,
+        text: String,
+        readTag: String,
+        expected: String,
+        maxAttempts: Int = MAX_CLICK_ATTEMPTS,
+    ) {
+        repeat(maxAttempts) { attempt ->
+            setText(tag, text)
             try {
                 waitForTextEquals(readTag, expected, timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
                 return

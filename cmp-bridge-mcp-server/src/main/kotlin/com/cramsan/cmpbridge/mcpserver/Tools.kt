@@ -73,7 +73,8 @@ private fun Server.registerClickTool(registry: BridgeSessionRegistry) {
 private fun Server.registerSetTextTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "set_text",
-        description = "Clicks the element with the given test tag, then types text into it.",
+        description = "Clicks the element with the given test tag, then replaces its content with text " +
+            "(\"\" clears it).",
         inputSchema = stringPropertiesSchema("tag" to "The element's test tag", "text" to "The text to type"),
     ) { request ->
         safeCall("set_text", request.arguments) {
