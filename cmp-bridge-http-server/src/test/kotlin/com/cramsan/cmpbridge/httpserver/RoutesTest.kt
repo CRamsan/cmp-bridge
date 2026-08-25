@@ -401,6 +401,82 @@ class RoutesTest {
     }
 
     @Test
+    fun `POST bridge with waitForTextEquals returns the node once its text matches`() = testApplication {
+        val driver = FakeBridgeDriver().apply { tree = TAGGED_NODE }
+        application { bridgeHttpModule(testRegistry(driver)) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"waitForTextEquals",""" +
+                        """"payload":{"tag":"my_tag","expected":"hello","timeoutMs":1000}}""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(response.bodyAsText().contains("\"text\":\"hello\""))
+    }
+
+    @Test
+    fun `POST bridge with waitForTextEquals on text that never matches returns 504 after the timeout`() =
+        testApplication {
+            val driver = FakeBridgeDriver().apply { tree = TAGGED_NODE }
+            application { bridgeHttpModule(testRegistry(driver)) }
+            val client = createClient { install(ContentNegotiation) { json() } }
+
+            val response =
+                client.post("/bridge") {
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{"target":{"platform":"desktop"},"operation":"waitForTextEquals",""" +
+                            """"payload":{"tag":"my_tag","expected":"goodbye","timeoutMs":200}}""",
+                    )
+                }
+
+            assertEquals(HttpStatusCode.GatewayTimeout, response.status)
+            assertTrue(response.bodyAsText().contains("never showed"))
+        }
+
+    @Test
+    fun `POST bridge with waitForTagGone returns 200 once the tag is gone`() = testApplication {
+        application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"waitForTagGone",""" +
+                        """"payload":{"tag":"missing","timeoutMs":1000}}""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+    }
+
+    @Test
+    fun `POST bridge with waitForTagGone on a tag that never disappears returns 504 after the timeout`() =
+        testApplication {
+            val driver = FakeBridgeDriver().apply { tree = TAGGED_NODE }
+            application { bridgeHttpModule(testRegistry(driver)) }
+            val client = createClient { install(ContentNegotiation) { json() } }
+
+            val response =
+                client.post("/bridge") {
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{"target":{"platform":"desktop"},"operation":"waitForTagGone",""" +
+                            """"payload":{"tag":"my_tag","timeoutMs":200}}""",
+                    )
+                }
+
+            assertEquals(HttpStatusCode.GatewayTimeout, response.status)
+            assertTrue(response.bodyAsText().contains("still present"))
+        }
+
+    @Test
     fun `POST bridge with an unknown operation returns 400`() = testApplication {
         application { bridgeHttpModule(testRegistry(FakeBridgeDriver())) }
         val client = createClient { install(ContentNegotiation) { json() } }

@@ -1,6 +1,7 @@
 package com.cramsan.cmpbridge.sample
 
 import com.cramsan.cmpbridge.driver.BridgeDriver
+import com.cramsan.cmpbridge.driver.BridgeTimeoutException
 import com.cramsan.cmpbridge.driver.DesktopAppProcess
 import com.cramsan.cmpbridge.driver.DesktopBridgeDriver
 import com.cramsan.cmpbridge.driver.ManagedBridgeDriver
@@ -40,7 +41,7 @@ class DemoScenarioTest {
 
             assertEquals("Hello, stranger!", d.waitForText("greeting_text").text)
             d.setText("name_field", "Ada")
-            assertEquals("Hello, Ada!", d.waitForTextEquals("greeting_text", "Hello, Ada!"))
+            assertEquals("Hello, Ada!", d.waitForTextEquals("greeting_text", "Hello, Ada!").text)
 
             // setText must replace a field's existing content, not paste at the cursor on top of
             // it (issue #7) — this would settle on "Hello, AdaGrace!" if it regressed. Longer
@@ -117,22 +118,6 @@ class DemoScenarioTest {
         assertEquals(PNG_MAGIC, png.take(PNG_MAGIC.size))
     }
 
-    /**
-     * Polls [tag]'s text until it equals [expected], or fails after [timeoutMs]. Distinct from
-     * [BridgeDriver.waitForText]: that one waits for *any* settled (non-null) text, this one
-     * waits for one specific value.
-     */
-    private fun BridgeDriver.waitForTextEquals(tag: String, expected: String, timeoutMs: Long = 15_000): String {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        var last: String? = null
-        while (System.currentTimeMillis() < deadline) {
-            last = getBounds(tag)?.text
-            if (last == expected) return last
-            Thread.sleep(TEXT_POLL_INTERVAL_MS)
-        }
-        error("\"$tag\" never showed \"$expected\" (last saw \"$last\") within ${timeoutMs}ms")
-    }
-
     /** Clicks [clickTag], re-clicking up to [maxAttempts] times until [readTag] shows [expected]. */
     private fun BridgeDriver.clickUntilText(
         clickTag: String,
@@ -145,7 +130,7 @@ class DemoScenarioTest {
             try {
                 waitForTextEquals(readTag, expected, timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
                 return
-            } catch (e: IllegalStateException) {
+            } catch (e: BridgeTimeoutException) {
                 if (attempt == maxAttempts - 1) throw e
             }
         }
@@ -169,7 +154,7 @@ class DemoScenarioTest {
             try {
                 waitForTextEquals(readTag, expected, timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
                 return
-            } catch (e: IllegalStateException) {
+            } catch (e: BridgeTimeoutException) {
                 if (attempt == maxAttempts - 1) throw e
             }
         }
@@ -181,7 +166,6 @@ class DemoScenarioTest {
         const val WEB_SCROLL_DELTA = 300
         const val MAX_CLICK_ATTEMPTS = 5
         const val CLICK_SETTLE_TIMEOUT_MS = 3_000L
-        const val TEXT_POLL_INTERVAL_MS = 100L
         const val MIN_PNG_SIZE_BYTES = 100
         val PNG_MAGIC = listOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte())
     }

@@ -26,10 +26,10 @@ private val json = Json { ignoreUnknownKeys = true }
 
 /**
  * Registers one MCP tool per [com.cramsan.cmpbridge.driver.BridgeDriver] core operation, plus
- * `waitForTag`/`waitForText` and a `disconnect` operation to end a session early, on [server].
- * Every tool takes the target app instance (`platform`, plus `host`/`port` or `url`) as arguments
- * and resolves a driver for it via [registry] on each call — see [BridgeSessionRegistry] for how
- * that's cached/evicted across calls.
+ * `waitForTag`/`waitForText`/`waitForTextEquals`/`waitForTagGone` and a `disconnect` operation to
+ * end a session early, on [server]. Every tool takes the target app instance (`platform`, plus
+ * `host`/`port` or `url`) as arguments and resolves a driver for it via [registry] on each call —
+ * see [BridgeSessionRegistry] for how that's cached/evicted across calls.
  */
 fun Server.registerBridgeTools(registry: BridgeSessionRegistry) {
     registerGetHierarchyTool(registry)
@@ -39,6 +39,8 @@ fun Server.registerBridgeTools(registry: BridgeSessionRegistry) {
     registerScreenshotTool(registry)
     registerWaitForTagTool(registry)
     registerWaitForTextTool(registry)
+    registerWaitForTextEqualsTool(registry)
+    registerWaitForTagGoneTool(registry)
     registerDisconnectTool(registry)
 }
 
@@ -172,6 +174,53 @@ private fun Server.registerWaitForTextTool(registry: BridgeSessionRegistry) {
     }
 }
 
+private fun Server.registerWaitForTextEqualsTool(registry: BridgeSessionRegistry) {
+    addTool(
+        name = "wait_for_text_equals",
+        description =
+        "Polls the app's UI tree until the element with the given test tag's text equals the " +
+            "given expected value (or errors on timeout). Use this for \"same screen, state " +
+            "changed\" assertions where no new tag appears — inline validation errors, toggled " +
+            "badges, a counter's new value — since the app's own async state update (e.g. a " +
+            "coroutine dispatch) may not have applied yet right after click/set_text returns.",
+        inputSchema = tagExpectedAndTimeoutSchema(),
+    ) { request ->
+        safeCall("wait_for_text_equals", request.arguments) {
+            val driver = registry.resolve(request.arguments.toBridgeTarget())
+            val tag = request.arguments.stringArg("tag")
+            val expected = request.arguments.stringArg("expected")
+            val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
+            val node =
+                if (timeoutMs != null) {
+                    driver.waitForTextEquals(tag, expected, timeoutMs)
+                } else {
+                    driver.waitForTextEquals(tag, expected)
+                }
+            CallToolResult(content = listOf(TextContent(text = json.encodeToString(node))))
+        }
+    }
+}
+
+private fun Server.registerWaitForTagGoneTool(registry: BridgeSessionRegistry) {
+    addTool(
+        name = "wait_for_tag_gone",
+        description =
+        "Polls the app's UI tree until the element with the given test tag is no longer found " +
+            "(or errors on timeout) — a no-op if it's already gone. Covers \"same screen, state " +
+            "changed\" cases like a success banner or dialog closing, the same way " +
+            "wait_for_text_equals covers a text change.",
+        inputSchema = tagAndTimeoutSchema(),
+    ) { request ->
+        safeCall("wait_for_tag_gone", request.arguments) {
+            val driver = registry.resolve(request.arguments.toBridgeTarget())
+            val tag = request.arguments.stringArg("tag")
+            val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
+            if (timeoutMs != null) driver.waitForTagGone(tag, timeoutMs) else driver.waitForTagGone(tag)
+            CallToolResult(content = listOf(TextContent(text = "Tag \"$tag\" is gone.")))
+        }
+    }
+}
+
 private fun Server.registerDisconnectTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "disconnect",
@@ -230,8 +279,9 @@ private fun targetOnlySchema(): ToolSchema = ToolSchema(
 )
 
 /**
- * Shared input schema for [registerWaitForTagTool] and [registerWaitForTextTool]: the target app
- * instance, a required `tag`, plus optional `timeoutMs`.
+ * Shared input schema for [registerWaitForTagTool], [registerWaitForTextTool], and
+ * [registerWaitForTagGoneTool]: the target app instance, a required `tag`, plus optional
+ * `timeoutMs`.
  */
 private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
     properties =
@@ -253,6 +303,36 @@ private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
         )
     },
     required = listOf("platform", "tag"),
+)
+
+/** Input schema for [registerWaitForTextEqualsTool]: [tagAndTimeoutSchema] plus a required `expected`. */
+private fun tagExpectedAndTimeoutSchema(): ToolSchema = ToolSchema(
+    properties =
+    buildJsonObject {
+        putTargetProperties()
+        put(
+            "tag",
+            buildJsonObject {
+                put("type", "string")
+                put("description", "The element's test tag")
+            },
+        )
+        put(
+            "expected",
+            buildJsonObject {
+                put("type", "string")
+                put("description", "The text value to wait for")
+            },
+        )
+        put(
+            "timeoutMs",
+            buildJsonObject {
+                put("type", "integer")
+                put("description", "Max time to wait, in milliseconds (default 15000)")
+            },
+        )
+    },
+    required = listOf("platform", "tag", "expected"),
 )
 
 private fun stringPropertiesSchema(vararg properties: Pair<String, String>): ToolSchema = ToolSchema(

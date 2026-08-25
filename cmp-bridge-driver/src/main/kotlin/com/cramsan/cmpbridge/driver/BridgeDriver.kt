@@ -40,6 +40,36 @@ interface BridgeDriver : AutoCloseable {
         throw BridgeTimeoutException("Tag \"$tag\"'s text never settled within ${timeoutMs}ms")
     }
 
+    /**
+     * Blocks until [tag]'s text equals [expected], up to [timeoutMs]. Use this rather than
+     * [waitForTag]/[waitForText] for "same screen, state changed" assertions where no new tag
+     * appears — inline validation errors, toggled badges, a counter's new value — that a click's
+     * own async (e.g. coroutine-dispatched) state update may not have applied yet by the time it
+     * returns.
+     */
+    fun waitForTextEquals(tag: String, expected: String, timeoutMs: Long = 15_000): HierarchyNode {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            getBounds(tag)?.takeIf { it.text == expected }?.let { return it }
+            Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
+        }
+        throw BridgeTimeoutException("Tag \"$tag\" never showed \"$expected\" within ${timeoutMs}ms")
+    }
+
+    /**
+     * Blocks until [tag] is no longer found, up to [timeoutMs] — a no-op if it's already gone.
+     * Covers "same screen, state changed" cases like a success banner or dialog closing, the same
+     * way [waitForTextEquals] covers a text change.
+     */
+    fun waitForTagGone(tag: String, timeoutMs: Long = 15_000) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (getBounds(tag) == null) return
+            Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
+        }
+        throw BridgeTimeoutException("Tag \"$tag\" was still present after ${timeoutMs}ms")
+    }
+
     /** Clicks the node tagged [tag] via a real synthetic input event. */
     fun click(tag: String)
 
