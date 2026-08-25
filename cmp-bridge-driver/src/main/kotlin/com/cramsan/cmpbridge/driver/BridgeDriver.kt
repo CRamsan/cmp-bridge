@@ -25,41 +25,30 @@ interface BridgeDriver : AutoCloseable {
     }
 
     /**
-     * Blocks until [tag]'s bounds have settled (per [getBounds]) and its `text` is non-null, up
-     * to [timeoutMs]. A node can report `null`/stale text on the very first read after it
-     * appears or a screen transition — desktop's semantics tree and web's (debounced
-     * 100–1000ms) accessibility-DOM sync both need a moment to catch up — so callers reading
-     * freshly-appeared text should go through this rather than a raw [getHierarchy] lookup.
+     * Blocks until [tag]'s settled (non-null) text satisfies [comparator], up to [timeoutMs]. A
+     * node can report `null`/stale text on the very first read after it appears or a screen
+     * transition — desktop's semantics tree and web's (debounced 100–1000ms) accessibility-DOM
+     * sync both need a moment to catch up — so callers reading freshly-appeared or
+     * freshly-changed text should go through this rather than a raw [getHierarchy] lookup. Also
+     * covers "same screen, state changed" assertions where no new tag appears — inline
+     * validation errors, toggled badges, a counter's new value — that a click's own async (e.g.
+     * coroutine-dispatched) state update may not have applied yet by the time it returns.
      */
-    fun waitForText(tag: String, timeoutMs: Long = 15_000): HierarchyNode {
+    fun waitForText(tag: String, comparator: TextComparator, timeoutMs: Long = 15_000): HierarchyNode {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            getBounds(tag)?.takeIf { it.text != null }?.let { return it }
+            val node = getBounds(tag)
+            val text = node?.text
+            if (node != null && text != null && comparator.matches(text)) return node
             Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
         }
-        throw BridgeTimeoutException("Tag \"$tag\"'s text never settled within ${timeoutMs}ms")
-    }
-
-    /**
-     * Blocks until [tag]'s text equals [expected], up to [timeoutMs]. Use this rather than
-     * [waitForTag]/[waitForText] for "same screen, state changed" assertions where no new tag
-     * appears — inline validation errors, toggled badges, a counter's new value — that a click's
-     * own async (e.g. coroutine-dispatched) state update may not have applied yet by the time it
-     * returns.
-     */
-    fun waitForTextEquals(tag: String, expected: String, timeoutMs: Long = 15_000): HierarchyNode {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            getBounds(tag)?.takeIf { it.text == expected }?.let { return it }
-            Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
-        }
-        throw BridgeTimeoutException("Tag \"$tag\" never showed \"$expected\" within ${timeoutMs}ms")
+        throw BridgeTimeoutException("Tag \"$tag\" never satisfied $comparator within ${timeoutMs}ms")
     }
 
     /**
      * Blocks until [tag] is no longer found, up to [timeoutMs] — a no-op if it's already gone.
      * Covers "same screen, state changed" cases like a success banner or dialog closing, the same
-     * way [waitForTextEquals] covers a text change.
+     * way [waitForText] covers a text change.
      */
     fun waitForTagGone(tag: String, timeoutMs: Long = 15_000) {
         val deadline = System.currentTimeMillis() + timeoutMs

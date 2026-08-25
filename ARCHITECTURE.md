@@ -117,9 +117,10 @@ from ARIA role, and a couple of known gaps are called out where they bite (see
 
 `BridgeDriver` (`cmp-bridge-driver/BridgeDriver.kt`) is the seam everything above the
 transport layer is written against: `getHierarchy`, `getBounds`/`waitForTag`/`waitForText`/
-`waitForTextEquals`/`waitForTagGone` (default methods built on `getHierarchy`), `click`,
-`setText`, `scroll`, `screenshot`, and `close` (`AutoCloseable`). `DesktopBridgeDriver` and
-`WebBridgeDriver` are its only two
+`waitForTagGone` (default methods built on `getHierarchy`; `waitForText` takes a
+`TextComparator` — `Present`/`Empty`/`Equals`/`StartsWith` — matched against a tag's
+settled text), `click`, `setText`, `scroll`, `screenshot`, and `close` (`AutoCloseable`).
+`DesktopBridgeDriver` and `WebBridgeDriver` are its only two
 implementations. Everything downstream — the HTTP server, the MCP server, an app's own
 test code — is written against this interface, not against either platform's transport.
 
@@ -148,10 +149,9 @@ same `BridgeDriver` implementations serve both.
 is one long-running process that resolves its target app instance **per
 request/tool-call**, so a single running instance can drive any number of apps over its
 lifetime. Both adapt the same `BridgeDriver` core operations, plus the
-`waitForTag`/`waitForText`/`waitForTextEquals`/`waitForTagGone` convenience helpers and a
-`disconnect` operation, to a different transport. Neither ever launches an app — both
-only attach to one that's already running with the bridge armed (or a wasmJs dev server
-already up).
+`waitForTag`/`waitForText`/`waitForTagGone` convenience helpers and a `disconnect`
+operation, to a different transport. Neither ever launches an app — both only attach to
+one that's already running with the bridge armed (or a wasmJs dev server already up).
 
 ### `BridgeSessionRegistry`: resolving a target per call
 

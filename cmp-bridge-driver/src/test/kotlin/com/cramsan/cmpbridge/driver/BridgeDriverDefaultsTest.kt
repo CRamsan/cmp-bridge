@@ -36,6 +36,14 @@ private val TAGGED_NODE_EXPECTED_TEXT =
         ),
     )
 
+private val TAGGED_NODE_EMPTY_TEXT =
+    EMPTY_ROOT.copy(
+        children =
+        listOf(
+            EMPTY_ROOT.copy(testTag = "my_tag", text = "", width = 10f, height = 10f),
+        ),
+    )
+
 /** A fake whose hierarchy never contains the tag being waited on, to exercise timeout paths. */
 private class NeverAppearsDriver : BridgeDriver {
     override fun getHierarchy(): HierarchyNode = EMPTY_ROOT
@@ -99,18 +107,28 @@ class BridgeDriverDefaultsTest {
     }
 
     @Test
-    fun `waitForText throws BridgeTimeoutException when the tag never appears`() {
+    fun `waitForText with Present throws BridgeTimeoutException when the tag never appears`() {
         val driver = NeverAppearsDriver()
-        val error = runCatching { driver.waitForText("my_tag", timeoutMs = 200) }.exceptionOrNull()
+        val error =
+            runCatching { driver.waitForText("my_tag", TextComparator.Present, timeoutMs = 200) }.exceptionOrNull()
         assertTrue(error is BridgeTimeoutException)
+        assertTrue(error.message.orEmpty().contains("never satisfied"))
     }
 
     @Test
-    fun `waitForText throws BridgeTimeoutException when the tag's text never settles`() {
+    fun `waitForText with Present throws BridgeTimeoutException when the tag's text never settles`() {
         val driver = TextNeverSettlesDriver()
-        val error = runCatching { driver.waitForText("my_tag", timeoutMs = 200) }.exceptionOrNull()
+        val error =
+            runCatching { driver.waitForText("my_tag", TextComparator.Present, timeoutMs = 200) }.exceptionOrNull()
         assertTrue(error is BridgeTimeoutException)
-        assertTrue(error.message.orEmpty().contains("never settled"))
+        assertTrue(error.message.orEmpty().contains("never satisfied"))
+    }
+
+    @Test
+    fun `waitForText with Present returns once the tag's text settles`() {
+        val driver = EventuallyChangesDriver(TAGGED_NODE_NO_TEXT, TAGGED_NODE_EXPECTED_TEXT, flipAfterCalls = 2)
+        val node = driver.waitForText("my_tag", TextComparator.Present, timeoutMs = 1_000)
+        assertEquals("expected", node.text)
     }
 
     @Test
@@ -121,24 +139,44 @@ class BridgeDriverDefaultsTest {
     }
 
     @Test
-    fun `waitForTextEquals throws BridgeTimeoutException when the text never matches`() {
+    fun `waitForText with Equals throws BridgeTimeoutException when the text never matches`() {
         val driver = FixedTextDriver(text = "wrong")
-        val error = runCatching { driver.waitForTextEquals("my_tag", "expected", timeoutMs = 200) }.exceptionOrNull()
+        val error =
+            runCatching {
+                driver.waitForText("my_tag", TextComparator.Equals("expected"), timeoutMs = 200)
+            }.exceptionOrNull()
         assertTrue(error is BridgeTimeoutException)
-        assertTrue(error.message.orEmpty().contains("never showed"))
+        assertTrue(error.message.orEmpty().contains("never satisfied"))
     }
 
     @Test
-    fun `waitForTextEquals throws BridgeTimeoutException when the tag never appears`() {
+    fun `waitForText with Equals throws BridgeTimeoutException when the tag never appears`() {
         val driver = NeverAppearsDriver()
-        val error = runCatching { driver.waitForTextEquals("my_tag", "expected", timeoutMs = 200) }.exceptionOrNull()
+        val error =
+            runCatching {
+                driver.waitForText("my_tag", TextComparator.Equals("expected"), timeoutMs = 200)
+            }.exceptionOrNull()
         assertTrue(error is BridgeTimeoutException)
     }
 
     @Test
-    fun `waitForTextEquals returns once the tag's text equals the expected value`() {
+    fun `waitForText with Equals returns once the tag's text equals the expected value`() {
         val driver = EventuallyChangesDriver(TAGGED_NODE_NO_TEXT, TAGGED_NODE_EXPECTED_TEXT, flipAfterCalls = 2)
-        val node = driver.waitForTextEquals("my_tag", "expected", timeoutMs = 1_000)
+        val node = driver.waitForText("my_tag", TextComparator.Equals("expected"), timeoutMs = 1_000)
+        assertEquals("expected", node.text)
+    }
+
+    @Test
+    fun `waitForText with Empty returns once the tag's text becomes empty`() {
+        val driver = EventuallyChangesDriver(TAGGED_NODE_EXPECTED_TEXT, TAGGED_NODE_EMPTY_TEXT, flipAfterCalls = 2)
+        val node = driver.waitForText("my_tag", TextComparator.Empty, timeoutMs = 1_000)
+        assertEquals("", node.text)
+    }
+
+    @Test
+    fun `waitForText with StartsWith returns once the tag's text starts with the prefix`() {
+        val driver = EventuallyChangesDriver(TAGGED_NODE_NO_TEXT, TAGGED_NODE_EXPECTED_TEXT, flipAfterCalls = 2)
+        val node = driver.waitForText("my_tag", TextComparator.StartsWith("exp"), timeoutMs = 1_000)
         assertEquals("expected", node.text)
     }
 

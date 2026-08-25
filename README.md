@@ -119,7 +119,7 @@ val process = DesktopAppProcess.launch("com.example.myapp.desktop.MainKt")
 val driver = DesktopBridgeDriver.connect(process.host, process.port)
 ManagedBridgeDriver(process, driver).use { d ->
     d.click("submit_button")
-    assertEquals("Done", d.waitForText("status_text").text)
+    d.waitForText("status_text", TextComparator.Equals("Done"))
 }
 ```
 
@@ -174,8 +174,7 @@ jar (`./gradlew :cmp-bridge-mcp-server:shadowJar`) and point an MCP client at it
 ## Driving an app over HTTP or MCP
 
 Both standalone servers wrap the same `BridgeDriver` core operations, plus the
-`waitForTag`/`waitForText`/`waitForTextEquals`/`waitForTagGone` convenience helpers, and both
-work the same way: **one
+`waitForTag`/`waitForText`/`waitForTagGone` convenience helpers, and both work the same way: **one
 long-running server instance resolves its target app instance per request/tool
 call**, so it can drive any number of apps (or the same app across restarts) over its
 lifetime. Every request/call carries a `target` — `{"platform": "desktop"}` (optionally
@@ -218,10 +217,18 @@ one that's already running.
 | `scroll` | `{"anchorTag": "...", "deltaY": N}` | Scroll gesture centered on `anchorTag`'s bounds. |
 | `screenshot` | — | The app's current frame as a PNG (binary response). |
 | `waitForTag` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag` appears, up to `timeoutMs` (default 15000); errors on timeout. |
-| `waitForText` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag`'s bounds settle and its text is non-null, up to `timeoutMs`; errors on timeout. |
-| `waitForTextEquals` | `{"tag": "...", "expected": "...", "timeoutMs": N}` | Polls until `tag`'s text equals `expected`, up to `timeoutMs`; errors on timeout. For "same screen, state changed" assertions — inline validation errors, toggled badges — that a click's own async state update may not have applied yet. |
-| `waitForTagGone` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag` is no longer found, up to `timeoutMs`; errors on timeout. A no-op if it's already gone. Covers a success banner or dialog closing, the same way `waitForTextEquals` covers a text change. |
+| `waitForText` | `{"tag": "...", "comparator": {...}, "timeoutMs": N}` | Polls until `tag`'s settled text satisfies `comparator`, up to `timeoutMs`; errors on timeout. For "same screen, state changed" assertions — inline validation errors, toggled badges — that a click's own async state update may not have applied yet, not just a new tag appearing. |
+| `waitForTagGone` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag` is no longer found, up to `timeoutMs`; errors on timeout. A no-op if it's already gone. Covers a success banner or dialog closing, the same way `waitForText` covers a text change. |
 | `disconnect` | — | Ends this target's session early, closing its driver. A no-op if it has none. |
+
+`waitForText`'s `comparator` is one of four shapes, matched against the tag's settled (non-null) text:
+
+| `comparator` | Matches when the text... |
+|---|---|
+| `{"type": "present"}` | ...is any non-null value. |
+| `{"type": "empty"}` | ...is exactly `""`. |
+| `{"type": "equals", "value": "..."}` | ...equals `value` exactly. |
+| `{"type": "startsWith", "prefix": "..."}` | ...starts with `prefix`. |
 
 ```bash
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
@@ -237,9 +244,9 @@ curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"target":{"platform":"desktop"},"operation":"waitForTag","payload":{"tag":"greeting_text"}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"target":{"platform":"desktop"},"operation":"waitForText","payload":{"tag":"greeting_text"}}'
+  -d '{"target":{"platform":"desktop"},"operation":"waitForText","payload":{"tag":"greeting_text","comparator":{"type":"present"}}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
-  -d '{"target":{"platform":"desktop"},"operation":"waitForTextEquals","payload":{"tag":"greeting_text","expected":"Hello, Ada!"}}'
+  -d '{"target":{"platform":"desktop"},"operation":"waitForText","payload":{"tag":"greeting_text","comparator":{"type":"equals","value":"Hello, Ada!"}}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"target":{"platform":"desktop"},"operation":"waitForTagGone","payload":{"tag":"loading_spinner"}}'
 curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
@@ -254,7 +261,7 @@ that reflects what went wrong:
 | `400` | The request itself is at fault: malformed JSON, an unrecognized `operation`, or an invalid target (unknown `platform`, missing `url` for `web`). |
 | `404` | The targeted tag doesn't exist right now (`click`/`setText`/`scroll`). |
 | `503` | The driver couldn't reach or stay connected to the app (socket refused/reset, browser crashed, Chromium still installing). |
-| `504` | `waitForTag`/`waitForText`/`waitForTextEquals`/`waitForTagGone` exceeded their timeout. |
+| `504` | `waitForTag`/`waitForText`/`waitForTagGone` exceeded their timeout. |
 | `500` | An unexpected failure not covered above. |
 
 **MCP (`cmp-bridge-mcp-server`)**
