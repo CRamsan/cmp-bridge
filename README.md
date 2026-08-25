@@ -213,7 +213,7 @@ one that's already running.
 |---|---|---|
 | `getHierarchy` | — | Returns the app's current `HierarchyNode` tree as JSON. |
 | `click` | `{"tag": "..."}` | Real synthetic click on the element with that test tag. |
-| `setText` | `{"tag": "...", "text": "..."}` | Clicks the element, then types `text` into it. |
+| `setText` | `{"tag": "...", "text": "..."}` | Clicks the element, selects any existing content, and replaces it with `text` (`""` clears it). |
 | `scroll` | `{"anchorTag": "...", "deltaY": N}` | Scroll gesture centered on `anchorTag`'s bounds. |
 | `screenshot` | — | The app's current frame as a PNG (binary response). |
 | `waitForTag` | `{"tag": "...", "timeoutMs": N}` | Polls until `tag` appears, up to `timeoutMs` (default 15000); errors on timeout. |

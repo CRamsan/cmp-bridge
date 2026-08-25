@@ -86,7 +86,18 @@ class WebBridgeDriver private constructor(
 
     override fun setText(tag: String, text: String) {
         click(tag)
-        playwrightCall { page.keyboard().type(text) }
+        // Select all existing content first so writing replaces it rather than inserting at the
+        // cursor on top of it (issue #7). Typing a non-empty string over a selection replaces it
+        // as a matter of course, but typing an empty string sends zero keystrokes — a common way
+        // to clear a field would otherwise be a no-op — so clearing needs an explicit Delete.
+        playwrightCall {
+            page.keyboard().press("Control+A")
+            if (text.isEmpty()) {
+                page.keyboard().press("Delete")
+            } else {
+                page.keyboard().type(text)
+            }
+        }
     }
 
     override fun scroll(anchorTag: String, deltaY: Int) = playwrightCall {

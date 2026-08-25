@@ -43,7 +43,7 @@ interface BridgeDriver : AutoCloseable {
     /** Clicks the node tagged [tag] via a real synthetic input event. */
     fun click(tag: String)
 
-    /** Clicks [tag], then types [text] into it. */
+    /** Clicks [tag], selects any existing content, and replaces it with [text] (`""` clears it). */
     fun setText(tag: String, text: String)
 
     /**

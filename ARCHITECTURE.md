@@ -77,8 +77,9 @@ app's end; the system property covers callers that construct the process directl
   walking the AWT component tree, since that internal nesting is version-dependent).
   Never `java.awt.Robot`, which drives the OS input queue rather than the app and
   doesn't work in headless/CI environments. Multi-character text entry goes through the
-  system clipboard + Ctrl+V; per-character key simulation doesn't reliably handle
-  unicode/locale-specific input.
+  system clipboard + Ctrl+V, preceded by a Ctrl+A select-all so it replaces the field's
+  existing content rather than inserting at the cursor on top of it; per-character key
+  simulation doesn't reliably handle unicode/locale-specific input.
 - **Screenshots** come from `SkiaLayer.screenshot()` — Compose Desktop renders through
   Skia directly, bypassing the standard AWT/Swing paint chain, so `Component.paint()`
   into an off-screen image only ever captures a blank background. Not

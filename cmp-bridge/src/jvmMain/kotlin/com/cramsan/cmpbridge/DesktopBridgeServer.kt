@@ -404,55 +404,33 @@ object DesktopBridgeServer {
     }
 
     /**
-     * Pastes [text] via the system clipboard rather than simulating keystrokes — per-character
-     * key simulation doesn't reliably insert arbitrary text (unicode, symbols) across keyboard
-     * layouts/locales. Assumes the target field is already focused by a preceding [click].
+     * Presses [modifierKey] then [key], releases [key] then [modifierKey] — a single key chord
+     * (e.g. Ctrl+A) — and blocks until it's been dispatched.
+     */
+    private fun sendKeyChord(target: Component, modifierKey: Int, key: Int, modifierMask: Int) {
+        val queue = Toolkit.getDefaultToolkit().systemEventQueue
+        val now = System.currentTimeMillis()
+        queue.postEvent(KeyEvent(target, KeyEvent.KEY_PRESSED, now, modifierMask, modifierKey, KeyEvent.CHAR_UNDEFINED))
+        queue.postEvent(KeyEvent(target, KeyEvent.KEY_PRESSED, now + 1, modifierMask, key, KeyEvent.CHAR_UNDEFINED))
+        queue.postEvent(KeyEvent(target, KeyEvent.KEY_RELEASED, now + 2, modifierMask, key, KeyEvent.CHAR_UNDEFINED))
+        queue.postEvent(
+            KeyEvent(target, KeyEvent.KEY_RELEASED, now + RELEASE_OFFSET_MS, 0, modifierKey, KeyEvent.CHAR_UNDEFINED),
+        )
+        SwingUtilities.invokeAndWait {}
+    }
+
+    /**
+     * Replaces the target field's entire content with [text] via the system clipboard rather than
+     * simulating keystrokes — per-character key simulation doesn't reliably insert arbitrary text
+     * (unicode, symbols) across keyboard layouts/locales. Assumes the target field is already
+     * focused by a preceding [click]. Selects all existing content first (Ctrl+A) so the paste
+     * replaces it rather than inserting at the cursor on top of it — without this, an empty [text]
+     * (a common way to clear a field) would be a no-op, since pasting nothing inserts nothing.
      */
     private fun pasteText(text: String, window: Window) {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
         val target = inputTargetComponent(window)
-        val queue = Toolkit.getDefaultToolkit().systemEventQueue
-        val now = System.currentTimeMillis()
-        queue.postEvent(
-            KeyEvent(
-                target,
-                KeyEvent.KEY_PRESSED,
-                now,
-                InputEvent.CTRL_DOWN_MASK,
-                KeyEvent.VK_CONTROL,
-                KeyEvent.CHAR_UNDEFINED,
-            ),
-        )
-        queue.postEvent(
-            KeyEvent(
-                target,
-                KeyEvent.KEY_PRESSED,
-                now + 1,
-                InputEvent.CTRL_DOWN_MASK,
-                KeyEvent.VK_V,
-                KeyEvent.CHAR_UNDEFINED,
-            ),
-        )
-        queue.postEvent(
-            KeyEvent(
-                target,
-                KeyEvent.KEY_RELEASED,
-                now + 2,
-                InputEvent.CTRL_DOWN_MASK,
-                KeyEvent.VK_V,
-                KeyEvent.CHAR_UNDEFINED,
-            ),
-        )
-        queue.postEvent(
-            KeyEvent(
-                target,
-                KeyEvent.KEY_RELEASED,
-                now + RELEASE_OFFSET_MS,
-                0,
-                KeyEvent.VK_CONTROL,
-                KeyEvent.CHAR_UNDEFINED,
-            ),
-        )
-        SwingUtilities.invokeAndWait {}
+        sendKeyChord(target, KeyEvent.VK_CONTROL, KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK)
+        sendKeyChord(target, KeyEvent.VK_CONTROL, KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK)
     }
 }
