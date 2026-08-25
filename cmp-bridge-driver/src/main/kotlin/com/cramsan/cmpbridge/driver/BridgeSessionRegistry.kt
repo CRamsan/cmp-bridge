@@ -73,8 +73,12 @@ class BridgeSessionRegistry(
 
         private fun defaultConnect(target: BridgeTarget): BridgeDriver = when (target.platform) {
             "desktop" -> DesktopBridgeDriver.connect(target.host, target.port)
-            "web" -> WebBridgeDriver.connect(target.url ?: error("\"url\" is required when platform is \"web\""))
-            else -> error("Unknown platform \"${target.platform}\"")
+
+            "web" -> WebBridgeDriver.connect(
+                target.url ?: throw InvalidTargetException("\"url\" is required when platform is \"web\""),
+            )
+
+            else -> throw InvalidTargetException("Unknown platform \"${target.platform}\"")
         }
     }
 }

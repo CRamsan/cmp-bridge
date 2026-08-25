@@ -1,14 +1,20 @@
 package com.cramsan.cmpbridge.httpserver
 
+import com.cramsan.cmpbridge.driver.BridgeConnectionException
 import com.cramsan.cmpbridge.driver.BridgeDriver
 import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
 import com.cramsan.cmpbridge.driver.BridgeTarget
+import com.cramsan.cmpbridge.driver.BridgeTimeoutException
+import com.cramsan.cmpbridge.driver.InvalidTargetException
+import com.cramsan.cmpbridge.driver.UnknownTagException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.application.install
+import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
@@ -18,6 +24,7 @@ import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -25,6 +32,10 @@ import kotlinx.serialization.json.decodeFromJsonElement
 
 @Serializable
 private data class ErrorResponse(val error: String)
+
+private suspend fun respondError(call: ApplicationCall, status: HttpStatusCode, cause: Throwable) {
+    call.respond(status, ErrorResponse(cause.message ?: cause::class.simpleName ?: "Unknown error"))
+}
 
 /**
  * Envelope every request to `/bridge` is wrapped in: [target] selects which app instance to
@@ -68,15 +79,24 @@ fun Application.bridgeHttpModule(registry: BridgeSessionRegistry) {
     install(CallLogging)
     install(ContentNegotiation) { json() }
     install(StatusPages) {
-        // BridgeDriver/BridgeSessionRegistry report failures (unknown tag, timeout, unresolvable
-        // target, ...) — and an unrecognized `operation` — as plain exceptions with a
-        // human-readable message, surfaced as-is rather than a generic 500/stack trace.
-        exception<Throwable> { call, cause ->
-            call.respond(
-                HttpStatusCode.BadRequest,
-                ErrorResponse(cause.message ?: cause::class.simpleName ?: "Unknown error"),
-            )
+        // BridgeDriver/BridgeSessionRegistry failures are typed (see BridgeDriverException's
+        // subtypes) so each maps to the status code that best fits what actually went wrong,
+        // rather than a uniform 400 — see README's "Driving an app over HTTP or MCP" section.
+        exception<UnknownTagException> { call, cause -> respondError(call, HttpStatusCode.NotFound, cause) }
+        exception<BridgeTimeoutException> { call, cause -> respondError(call, HttpStatusCode.GatewayTimeout, cause) }
+        exception<BridgeConnectionException> { call, cause ->
+            respondError(call, HttpStatusCode.ServiceUnavailable, cause)
         }
+        exception<InvalidTargetException> { call, cause -> respondError(call, HttpStatusCode.BadRequest, cause) }
+        // An unrecognized `operation`, malformed JSON, or a payload that doesn't decode into its
+        // operation's expected shape — the request itself is at fault, not the app/driver.
+        exception<IllegalArgumentException> { call, cause -> respondError(call, HttpStatusCode.BadRequest, cause) }
+        exception<SerializationException> { call, cause -> respondError(call, HttpStatusCode.BadRequest, cause) }
+        // call.receive<BridgeRequest>() decode failures (malformed/non-JSON body) surface as this
+        // ktor-level wrapper rather than a bare SerializationException.
+        exception<BadRequestException> { call, cause -> respondError(call, HttpStatusCode.BadRequest, cause) }
+        // Anything else is unexpected/unmapped — a real server-side failure, not a client mistake.
+        exception<Throwable> { call, cause -> respondError(call, HttpStatusCode.InternalServerError, cause) }
     }
 
     routing {
@@ -123,7 +143,7 @@ fun Application.bridgeHttpModule(registry: BridgeSessionRegistry) {
                         call.respond(driver.waitForText(payload.tag, payload.timeoutMs))
                     }
 
-                    else -> error("Unknown operation \"${request.operation}\"")
+                    else -> throw IllegalArgumentException("Unknown operation \"${request.operation}\"")
                 }
             }
         }

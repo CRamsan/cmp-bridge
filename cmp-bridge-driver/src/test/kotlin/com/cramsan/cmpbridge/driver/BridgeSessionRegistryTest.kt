@@ -240,7 +240,7 @@ class BridgeSessionRegistryTest {
     fun `default connect dispatches on platform and requires url for web`() {
         val registry = BridgeSessionRegistry(maxIdleMs = TEST_LIMIT_MS, maxSessionMs = TEST_LIMIT_MS)
         val error = runCatching { registry.resolve(BridgeTarget(platform = "web")) }.exceptionOrNull()
-        assertTrue(error is IllegalStateException)
+        assertTrue(error is InvalidTargetException)
         assertTrue(error.message.orEmpty().contains("url"))
     }
 
@@ -248,7 +248,19 @@ class BridgeSessionRegistryTest {
     fun `default connect rejects an unknown platform`() {
         val registry = BridgeSessionRegistry(maxIdleMs = TEST_LIMIT_MS, maxSessionMs = TEST_LIMIT_MS)
         val error = runCatching { registry.resolve(BridgeTarget(platform = "bogus")) }.exceptionOrNull()
-        assertTrue(error is IllegalStateException)
+        assertTrue(error is InvalidTargetException)
         assertFalse(error.message.isNullOrBlank())
+    }
+
+    @Test
+    fun `resolve propagates a BridgeConnectionException thrown by connect unchanged`() {
+        val thrown = BridgeConnectionException("could not reach app")
+        val registry = BridgeSessionRegistry(
+            maxIdleMs = TEST_LIMIT_MS,
+            maxSessionMs = TEST_LIMIT_MS,
+            connect = { throw thrown },
+        )
+        val error = runCatching { registry.resolve(DESKTOP_TARGET) }.exceptionOrNull()
+        assertSame(thrown, error)
     }
 }

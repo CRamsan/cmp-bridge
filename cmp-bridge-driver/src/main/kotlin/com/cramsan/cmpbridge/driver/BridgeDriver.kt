@@ -21,7 +21,7 @@ interface BridgeDriver : AutoCloseable {
             getBounds(tag)?.let { return it }
             Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
         }
-        error("Tag \"$tag\" did not appear within ${timeoutMs}ms")
+        throw BridgeTimeoutException("Tag \"$tag\" did not appear within ${timeoutMs}ms")
     }
 
     /**
@@ -37,7 +37,7 @@ interface BridgeDriver : AutoCloseable {
             getBounds(tag)?.takeIf { it.text != null }?.let { return it }
             Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
         }
-        error("Tag \"$tag\"'s text never settled within ${timeoutMs}ms")
+        throw BridgeTimeoutException("Tag \"$tag\"'s text never settled within ${timeoutMs}ms")
     }
 
     /** Clicks the node tagged [tag] via a real synthetic input event. */

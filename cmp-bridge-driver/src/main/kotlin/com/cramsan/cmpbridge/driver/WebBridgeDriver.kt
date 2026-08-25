@@ -5,6 +5,7 @@ import com.microsoft.playwright.Browser
 import com.microsoft.playwright.BrowserType
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
+import com.microsoft.playwright.PlaywrightException
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Path
@@ -66,30 +67,37 @@ class WebBridgeDriver private constructor(
     private val browser: Browser,
     private val page: Page,
 ) : BridgeDriver {
-    override fun getHierarchy(): HierarchyNode {
-        val response = page.evaluate(WALK_ACCESSIBILITY_TREE_JS) as String
-        return json.decodeFromString(response)
+    /** Runs [block], rethrowing any [PlaywrightException] (a dead page/browser) as [BridgeConnectionException]. */
+    private inline fun <T> playwrightCall(block: () -> T): T = try {
+        block()
+    } catch (e: PlaywrightException) {
+        throw BridgeConnectionException(e.message ?: "Playwright call failed", e)
     }
 
-    override fun click(tag: String) {
-        val node = getBounds(tag) ?: error("Cannot click unknown tag \"$tag\"")
+    override fun getHierarchy(): HierarchyNode = playwrightCall {
+        val response = page.evaluate(WALK_ACCESSIBILITY_TREE_JS) as String
+        json.decodeFromString(response)
+    }
+
+    override fun click(tag: String) = playwrightCall {
+        val node = getBounds(tag) ?: throw UnknownTagException("Cannot click unknown tag \"$tag\"")
         page.mouse().click(node.x + node.width / 2.0, node.y + node.height / 2.0)
     }
 
     override fun setText(tag: String, text: String) {
         click(tag)
-        page.keyboard().type(text)
+        playwrightCall { page.keyboard().type(text) }
     }
 
-    override fun scroll(anchorTag: String, deltaY: Int) {
-        val node = getBounds(anchorTag) ?: error("Cannot scroll at unknown tag \"$anchorTag\"")
+    override fun scroll(anchorTag: String, deltaY: Int) = playwrightCall {
+        val node = getBounds(anchorTag) ?: throw UnknownTagException("Cannot scroll at unknown tag \"$anchorTag\"")
         val x = node.x + node.width / 2.0
         val y = node.y + node.height / 2.0
         page.mouse().move(x, y)
         page.mouse().wheel(0.0, deltaY.toDouble())
     }
 
-    override fun screenshot(): ByteArray = page.screenshot(Page.ScreenshotOptions())
+    override fun screenshot(): ByteArray = playwrightCall { page.screenshot(Page.ScreenshotOptions()) }
 
     override fun close() {
         page.close()
@@ -114,7 +122,7 @@ class WebBridgeDriver private constructor(
             }
 
         /** Attaches to a wasmJs app that's already running at [url]. */
-        fun connect(url: String): WebBridgeDriver {
+        fun connect(url: String): WebBridgeDriver = try {
             ensureChromiumInstalled()
             // Playwright.create() would otherwise install its whole default browser set
             // (Chromium, Firefox, WebKit) on first use — this driver only ever launches Chromium.
@@ -133,7 +141,9 @@ class WebBridgeDriver private constructor(
                 null,
                 Page.WaitForFunctionOptions().setTimeout(BRIDGE_TIMEOUT_MS.toDouble()),
             )
-            return WebBridgeDriver(playwright, browser, page)
+            WebBridgeDriver(playwright, browser, page)
+        } catch (e: PlaywrightException) {
+            throw BridgeConnectionException(e.message ?: "Could not connect to a web app at $url", e)
         }
 
         /**
@@ -157,7 +167,7 @@ class WebBridgeDriver private constructor(
             val future = installFuture ?: synchronized(installLock) { installFuture ?: startChromiumInstall() }
 
             if (!future.isDone) {
-                error(
+                throw BridgeConnectionException(
                     "Chromium isn't installed yet — a first-time install (~500 MiB) just started " +
                         "in the background; see server logs for progress. Try this request again " +
                         "in a few minutes.",
@@ -222,7 +232,9 @@ class WebBridgeDriver private constructor(
             outputThread.join(OUTPUT_DRAIN_TIMEOUT_MS)
 
             if (finished && process.exitValue() == 0) return
-            error("Failed to install Chromium for Playwright within ${CHROMIUM_INSTALL_TIMEOUT_MS}ms")
+            throw BridgeConnectionException(
+                "Failed to install Chromium for Playwright within ${CHROMIUM_INSTALL_TIMEOUT_MS}ms",
+            )
         }
 
         /**

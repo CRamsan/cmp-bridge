@@ -239,8 +239,16 @@ curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
   -d '{"target":{"platform":"desktop"},"operation":"disconnect"}'
 ```
 
-A failed operation (unknown tag, timeout, an unrecognized `operation`, an unresolvable
-target, ...) comes back as `400` with `{"error": "..."}` rather than a stack trace.
+A failed operation comes back as `{"error": "..."}` rather than a stack trace, with a status code
+that reflects what went wrong:
+
+| Status | Meaning |
+| --- | --- |
+| `400` | The request itself is at fault: malformed JSON, an unrecognized `operation`, or an invalid target (unknown `platform`, missing `url` for `web`). |
+| `404` | The targeted tag doesn't exist right now (`click`/`setText`/`scroll`). |
+| `503` | The driver couldn't reach or stay connected to the app (socket refused/reset, browser crashed, Chromium still installing). |
+| `504` | `waitForTag`/`waitForText` exceeded their timeout. |
+| `500` | An unexpected failure not covered above. |
 
 **MCP (`cmp-bridge-mcp-server`)**
 
