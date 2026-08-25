@@ -6,7 +6,7 @@ sealed class BridgeDriverException(message: String, cause: Throwable? = null) : 
 /** The targeted tag doesn't exist right now (click/setText/scroll/hierarchy lookup). */
 class UnknownTagException(message: String) : BridgeDriverException(message)
 
-/** A wait ([BridgeDriver.waitForTag]/[BridgeDriver.waitForText]) exceeded its timeout. */
+/** A wait ([BridgeDriver.waitForTagVisibility]/[BridgeDriver.waitForText]) exceeded its timeout. */
 class BridgeTimeoutException(message: String) : BridgeDriverException(message)
 
 /** The driver couldn't reach or stay connected to the app (socket/browser-level failure). */

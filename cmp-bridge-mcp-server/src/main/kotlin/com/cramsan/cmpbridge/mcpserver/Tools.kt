@@ -6,6 +6,8 @@ package com.cramsan.cmpbridge.mcpserver
 
 import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
 import com.cramsan.cmpbridge.driver.BridgeTarget
+import com.cramsan.cmpbridge.driver.TagVisibility
+import com.cramsan.cmpbridge.driver.TextComparator
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
@@ -13,23 +15,27 @@ import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import java.util.Base64
 
 private val json = Json { ignoreUnknownKeys = true }
 
 /**
  * Registers one MCP tool per [com.cramsan.cmpbridge.driver.BridgeDriver] core operation, plus
- * `waitForTag`/`waitForText` and a `disconnect` operation to end a session early, on [server].
- * Every tool takes the target app instance (`platform`, plus `host`/`port` or `url`) as arguments
- * and resolves a driver for it via [registry] on each call — see [BridgeSessionRegistry] for how
- * that's cached/evicted across calls.
+ * `waitForTagVisibility`/`waitForText` and a `disconnect` operation to end a session early, on
+ * [server]. Every tool takes the target app instance (`platform`, plus `host`/`port` or `url`) as
+ * arguments and resolves a driver for it via [registry] on each call — see [BridgeSessionRegistry]
+ * for how that's cached/evicted across calls.
  */
 fun Server.registerBridgeTools(registry: BridgeSessionRegistry) {
     registerGetHierarchyTool(registry)
@@ -37,7 +43,7 @@ fun Server.registerBridgeTools(registry: BridgeSessionRegistry) {
     registerSetTextTool(registry)
     registerScrollTool(registry)
     registerScreenshotTool(registry)
-    registerWaitForTagTool(registry)
+    registerWaitForTagVisibilityTool(registry)
     registerWaitForTextTool(registry)
     registerDisconnectTool(registry)
 }
@@ -134,20 +140,28 @@ private fun Server.registerScreenshotTool(registry: BridgeSessionRegistry) {
     }
 }
 
-private fun Server.registerWaitForTagTool(registry: BridgeSessionRegistry) {
+private fun Server.registerWaitForTagVisibilityTool(registry: BridgeSessionRegistry) {
     addTool(
-        name = "wait_for_tag",
+        name = "wait_for_tag_visibility",
         description =
-        "Polls the app's UI tree until the element with the given test tag appears (or errors " +
-            "on timeout), instead of repeatedly calling get_hierarchy yourself while waiting for " +
-            "something to show up.",
-        inputSchema = tagAndTimeoutSchema(),
+        "Polls the app's UI tree until the element with the given test tag's existence matches " +
+            "visibility (or errors on timeout). VISIBLE is for \"a new tag appeared\" (e.g. after " +
+            "a navigation), instead of repeatedly calling get_hierarchy yourself while waiting " +
+            "for something to show up. GONE is for \"same screen, state changed\" cases like a " +
+            "success banner or dialog closing, the same way wait_for_text covers a text change.",
+        inputSchema = waitForTagVisibilitySchema(),
     ) { request ->
-        safeCall("wait_for_tag", request.arguments) {
+        safeCall("wait_for_tag_visibility", request.arguments) {
             val driver = registry.resolve(request.arguments.toBridgeTarget())
             val tag = request.arguments.stringArg("tag")
+            val visibility = TagVisibility.valueOf(request.arguments.stringArg("visibility"))
             val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
-            val node = if (timeoutMs != null) driver.waitForTag(tag, timeoutMs) else driver.waitForTag(tag)
+            val node =
+                if (timeoutMs != null) {
+                    driver.waitForTagVisibility(tag, visibility, timeoutMs)
+                } else {
+                    driver.waitForTagVisibility(tag, visibility)
+                }
             CallToolResult(content = listOf(TextContent(text = json.encodeToString(node))))
         }
     }
@@ -157,16 +171,28 @@ private fun Server.registerWaitForTextTool(registry: BridgeSessionRegistry) {
     addTool(
         name = "wait_for_text",
         description =
-        "Polls the app's UI tree until the element with the given test tag has settled, " +
-            "non-null text (or errors on timeout) — guards against reading a freshly-appeared " +
-            "node's still-settling text, unlike a raw get_hierarchy call.",
-        inputSchema = tagAndTimeoutSchema(),
+        "Polls the app's UI tree until the element with the given test tag's settled text " +
+            "satisfies comparator (or errors on timeout). Use this for \"same screen, state " +
+            "changed\" assertions, not just a new tag appearing — inline validation errors, " +
+            "toggled badges, a counter's new value — since the app's own async state update " +
+            "(e.g. a coroutine dispatch) may not have applied yet right after click/set_text " +
+            "returns. Also guards against reading a freshly-appeared node's still-settling text, " +
+            "unlike a raw get_hierarchy call.",
+        inputSchema = waitForTextSchema(),
     ) { request ->
         safeCall("wait_for_text", request.arguments) {
             val driver = registry.resolve(request.arguments.toBridgeTarget())
             val tag = request.arguments.stringArg("tag")
+            val comparator = json.decodeFromJsonElement<TextComparator>(
+                request.arguments?.get("comparator") ?: error("Missing \"comparator\" argument"),
+            )
             val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
-            val node = if (timeoutMs != null) driver.waitForText(tag, timeoutMs) else driver.waitForText(tag)
+            val node =
+                if (timeoutMs != null) {
+                    driver.waitForText(tag, comparator, timeoutMs)
+                } else {
+                    driver.waitForText(tag, comparator)
+                }
             CallToolResult(content = listOf(TextContent(text = json.encodeToString(node))))
         }
     }
@@ -230,10 +256,10 @@ private fun targetOnlySchema(): ToolSchema = ToolSchema(
 )
 
 /**
- * Shared input schema for [registerWaitForTagTool] and [registerWaitForTextTool]: the target app
- * instance, a required `tag`, plus optional `timeoutMs`.
+ * Input schema for [registerWaitForTagVisibilityTool]: the target app instance, a required `tag`
+ * and `visibility` (matching [TagVisibility]'s own entry names), plus optional `timeoutMs`.
  */
-private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
+private fun waitForTagVisibilitySchema(): ToolSchema = ToolSchema(
     properties =
     buildJsonObject {
         putTargetProperties()
@@ -245,6 +271,14 @@ private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
             },
         )
         put(
+            "visibility",
+            buildJsonObject {
+                put("type", "string")
+                put("enum", JsonArray(listOf(JsonPrimitive("VISIBLE"), JsonPrimitive("GONE"))))
+                put("description", "VISIBLE to wait for the tag to appear, GONE to wait for it to disappear")
+            },
+        )
+        put(
             "timeoutMs",
             buildJsonObject {
                 put("type", "integer")
@@ -252,8 +286,79 @@ private fun tagAndTimeoutSchema(): ToolSchema = ToolSchema(
             },
         )
     },
-    required = listOf("platform", "tag"),
+    required = listOf("platform", "tag", "visibility"),
 )
+
+/**
+ * Input schema for [registerWaitForTextTool]: [tagAndTimeoutSchema]'s shape plus a required
+ * `comparator`, mirroring [TextComparator]'s own sealed shape/`@SerialName`s so it decodes with the
+ * same `json` instance used everywhere else in this file.
+ */
+private fun waitForTextSchema(): ToolSchema = ToolSchema(
+    properties =
+    buildJsonObject {
+        putTargetProperties()
+        put(
+            "tag",
+            buildJsonObject {
+                put("type", "string")
+                put("description", "The element's test tag")
+            },
+        )
+        put("comparator", comparatorSchema())
+        put(
+            "timeoutMs",
+            buildJsonObject {
+                put("type", "integer")
+                put("description", "Max time to wait, in milliseconds (default 15000)")
+            },
+        )
+    },
+    required = listOf("platform", "tag", "comparator"),
+)
+
+/**
+ * JSON Schema for [TextComparator]: a discriminated union on `type`, one shape per variant's own
+ * `@SerialName` and fields.
+ */
+private fun comparatorSchema(): JsonObject = buildJsonObject {
+    put("description", "How to match the tag's settled text")
+    put(
+        "oneOf",
+        JsonArray(
+            listOf(
+                comparatorVariantSchema("present"),
+                comparatorVariantSchema("empty"),
+                comparatorVariantSchema("equals", "value" to "The exact text to match"),
+                comparatorVariantSchema("startsWith", "prefix" to "The prefix the text must start with"),
+            ),
+        ),
+    )
+}
+
+private fun comparatorVariantSchema(type: String, vararg extraProperties: Pair<String, String>): JsonObject =
+    buildJsonObject {
+        put("type", "object")
+        put(
+            "properties",
+            buildJsonObject {
+                put("type", buildJsonObject { put("const", type) })
+                extraProperties.forEach { (name, description) ->
+                    put(
+                        name,
+                        buildJsonObject {
+                            put("type", "string")
+                            put("description", description)
+                        },
+                    )
+                }
+            },
+        )
+        putJsonArray("required") {
+            add(JsonPrimitive("type"))
+            extraProperties.forEach { (name, _) -> add(JsonPrimitive(name)) }
+        }
+    }
 
 private fun stringPropertiesSchema(vararg properties: Pair<String, String>): ToolSchema = ToolSchema(
     properties =

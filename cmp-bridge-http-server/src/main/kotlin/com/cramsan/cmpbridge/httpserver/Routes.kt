@@ -6,6 +6,8 @@ import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
 import com.cramsan.cmpbridge.driver.BridgeTarget
 import com.cramsan.cmpbridge.driver.BridgeTimeoutException
 import com.cramsan.cmpbridge.driver.InvalidTargetException
+import com.cramsan.cmpbridge.driver.TagVisibility
+import com.cramsan.cmpbridge.driver.TextComparator
 import com.cramsan.cmpbridge.driver.UnknownTagException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -41,8 +43,8 @@ private suspend fun respondError(call: ApplicationCall, status: HttpStatusCode, 
  * Envelope every request to `/bridge` is wrapped in: [target] selects which app instance to
  * attach to (resolved/cached via [BridgeSessionRegistry] — see there for eviction rules),
  * [operation] selects the [BridgeDriver] call to make (`"getHierarchy"`, `"click"`, `"setText"`,
- * `"scroll"`, `"screenshot"`, `"waitForTag"`, `"waitForText"`, or `"disconnect"` to end the
- * target's session early), and [payload] is decoded into that operation's own argument type.
+ * `"scroll"`, `"screenshot"`, `"waitForTagVisibility"`, `"waitForText"`, or `"disconnect"` to end
+ * the target's session early), and [payload] is decoded into that operation's own argument type.
  * Absent for operations that take none.
  */
 @Serializable
@@ -57,18 +59,22 @@ private data class SetTextPayload(val tag: String, val text: String)
 @Serializable
 private data class ScrollPayload(val anchorTag: String, val deltaY: Int)
 
-/** [timeoutMs] mirrors [BridgeDriver.waitForTag]'s own default. */
+/** [timeoutMs] mirrors [BridgeDriver.waitForTagVisibility]'s own default; [visibility] is required. */
 @Serializable
-private data class WaitForTagPayload(val tag: String, val timeoutMs: Long = 15_000)
+private data class WaitForTagVisibilityPayload(
+    val tag: String,
+    val visibility: TagVisibility,
+    val timeoutMs: Long = 15_000,
+)
 
-/** [timeoutMs] mirrors [BridgeDriver.waitForText]'s own default. */
+/** [timeoutMs] mirrors [BridgeDriver.waitForText]'s own default; [comparator] is required. */
 @Serializable
-private data class WaitForTextPayload(val tag: String, val timeoutMs: Long = 15_000)
+private data class WaitForTextPayload(val tag: String, val comparator: TextComparator, val timeoutMs: Long = 15_000)
 
 private val payloadJson = Json { ignoreUnknownKeys = true }
 
 /**
- * Wires [BridgeDriver]'s five core operations, plus the [BridgeDriver.waitForTag] and
+ * Wires [BridgeDriver]'s five core operations, plus the [BridgeDriver.waitForTagVisibility] and
  * [BridgeDriver.waitForText] convenience helpers and a `disconnect` operation to end a session
  * early, up behind a single endpoint, `POST /bridge`, dispatched on the request body's `operation`
  * field — e.g. `{"target": {"platform": "desktop"}, "operation": "setText", "payload": {"tag":
@@ -100,52 +106,56 @@ fun Application.bridgeHttpModule(registry: BridgeSessionRegistry) {
     }
 
     routing {
-        post("/bridge") {
-            val request = call.receive<BridgeRequest>()
-            logOperation(request) {
-                if (request.operation == "disconnect") {
-                    registry.disconnect(request.target)
-                    call.respond(HttpStatusCode.OK)
-                    return@post
-                }
+        post("/bridge") { handleBridgeRequest(call, registry) }
+    }
+}
 
-                val driver = registry.resolve(request.target)
-                when (request.operation) {
-                    "getHierarchy" -> call.respond(driver.getHierarchy())
+/** Dispatches one decoded [BridgeRequest] to its [BridgeDriver] operation and writes the response. */
+private suspend fun handleBridgeRequest(call: ApplicationCall, registry: BridgeSessionRegistry) {
+    val request = call.receive<BridgeRequest>()
+    logOperation(request) {
+        if (request.operation == "disconnect") {
+            registry.disconnect(request.target)
+            call.respond(HttpStatusCode.OK)
+            return@logOperation
+        }
 
-                    "click" -> {
-                        val payload = payloadJson.decodeFromJsonElement<ClickPayload>(request.payload)
-                        driver.click(payload.tag)
-                        call.respond(HttpStatusCode.OK)
-                    }
+        val driver = registry.resolve(request.target)
+        when (request.operation) {
+            "getHierarchy" -> call.respond(driver.getHierarchy())
 
-                    "setText" -> {
-                        val payload = payloadJson.decodeFromJsonElement<SetTextPayload>(request.payload)
-                        driver.setText(payload.tag, payload.text)
-                        call.respond(HttpStatusCode.OK)
-                    }
-
-                    "scroll" -> {
-                        val payload = payloadJson.decodeFromJsonElement<ScrollPayload>(request.payload)
-                        driver.scroll(payload.anchorTag, payload.deltaY)
-                        call.respond(HttpStatusCode.OK)
-                    }
-
-                    "screenshot" -> call.respondBytes(driver.screenshot(), ContentType.Image.PNG)
-
-                    "waitForTag" -> {
-                        val payload = payloadJson.decodeFromJsonElement<WaitForTagPayload>(request.payload)
-                        call.respond(driver.waitForTag(payload.tag, payload.timeoutMs))
-                    }
-
-                    "waitForText" -> {
-                        val payload = payloadJson.decodeFromJsonElement<WaitForTextPayload>(request.payload)
-                        call.respond(driver.waitForText(payload.tag, payload.timeoutMs))
-                    }
-
-                    else -> throw IllegalArgumentException("Unknown operation \"${request.operation}\"")
-                }
+            "click" -> {
+                val payload = payloadJson.decodeFromJsonElement<ClickPayload>(request.payload)
+                driver.click(payload.tag)
+                call.respond(HttpStatusCode.OK)
             }
+
+            "setText" -> {
+                val payload = payloadJson.decodeFromJsonElement<SetTextPayload>(request.payload)
+                driver.setText(payload.tag, payload.text)
+                call.respond(HttpStatusCode.OK)
+            }
+
+            "scroll" -> {
+                val payload = payloadJson.decodeFromJsonElement<ScrollPayload>(request.payload)
+                driver.scroll(payload.anchorTag, payload.deltaY)
+                call.respond(HttpStatusCode.OK)
+            }
+
+            "screenshot" -> call.respondBytes(driver.screenshot(), ContentType.Image.PNG)
+
+            "waitForTagVisibility" -> {
+                val payload = payloadJson.decodeFromJsonElement<WaitForTagVisibilityPayload>(request.payload)
+                val node = driver.waitForTagVisibility(payload.tag, payload.visibility, payload.timeoutMs)
+                if (node != null) call.respond(node) else call.respond(HttpStatusCode.OK)
+            }
+
+            "waitForText" -> {
+                val payload = payloadJson.decodeFromJsonElement<WaitForTextPayload>(request.payload)
+                call.respond(driver.waitForText(payload.tag, payload.comparator, payload.timeoutMs))
+            }
+
+            else -> throw IllegalArgumentException("Unknown operation \"${request.operation}\"")
         }
     }
 }
