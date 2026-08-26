@@ -1,5 +1,10 @@
 # cmp-bridge
 
+> [!IMPORTANT]  
+> This library is used by me internally and it is expected to be used and maintained for the foreseeable future.
+> Consider it at an **alpha** state with breaking changes on any release. Once we reach a stable 1.0 release, we will
+> begin following semantic versioning.
+
 Drive a running [Compose Multiplatform](https://www.jetbrains.com/lp/compose-multiplatform/)
 app for UI automation and end-to-end testing: read its live semantics tree, click,
 type, scroll, and capture screenshots — through the app's *real* input pipeline, not a
