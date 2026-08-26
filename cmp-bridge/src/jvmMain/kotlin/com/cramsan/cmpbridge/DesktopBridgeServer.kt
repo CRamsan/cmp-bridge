@@ -70,6 +70,9 @@ object DesktopBridgeServer {
     // AWT's wheel model is click-based, not pixel-based; matches the platform's typical default.
     private const val WHEEL_SCROLL_AMOUNT = 3
 
+    // See pasteText's own doc for why this settle is needed between Ctrl+A and the paste.
+    private const val SELECT_ALL_SETTLE_MS = 50L
+
     // Subset of SemanticsActions surfaced on HierarchyNode.actions.
     private val ACTION_KEYS: List<Pair<String, SemanticsPropertyKey<*>>> =
         listOf(
@@ -128,7 +131,7 @@ object DesktopBridgeServer {
     /** Dispatches a single [BridgeCommand] to its handler, producing a [BridgeResponse]. */
     private fun handleCommand(command: BridgeCommand, window: Window): BridgeResponse = when (command) {
         is BridgeCommand.GetHierarchy -> {
-            BridgeResponse.Hierarchy(buildHierarchy(window))
+            BridgeResponse.Hierarchy(onEdt { buildHierarchy(window) })
         }
 
         is BridgeCommand.Click -> {
@@ -158,6 +161,21 @@ object DesktopBridgeServer {
     }
 
     private fun unknownTag(tag: String): BridgeResponse.Failure = BridgeResponse.Failure("Unknown tag: $tag")
+
+    /**
+     * Runs [block] on the AWT event dispatch thread and returns its result. Compose's live
+     * semantics/layout tree is only safe to read from the same thread that mutates it — the one
+     * write operations already marshal onto via [SwingUtilities.invokeAndWait]. Reading it
+     * directly from this connection's own IO-dispatched coroutine can race a concurrent
+     * structural change (`LazyColumn` recycling during [scroll], recomposition during
+     * [pasteText]) and crash mid-read on a torn tree — reproduced as a
+     * `LayoutNode.getZIndex()` NPE during stress testing (issue #23).
+     */
+    private fun <T> onEdt(block: () -> T): T {
+        var result: Result<T>? = null
+        SwingUtilities.invokeAndWait { result = runCatching(block) }
+        return result!!.getOrThrow()
+    }
 
     /** Builds a fresh [HierarchyNode] tree from the app's semantics tree — queried live, never cached. */
     @OptIn(ExperimentalComposeUiApi::class)
@@ -275,7 +293,7 @@ object DesktopBridgeServer {
 
     /** Returns `false` without dispatching anything if [tag] isn't known yet. */
     private fun click(tag: String, window: Window): Boolean {
-        val node = buildHierarchy(window).find(tag) ?: return false
+        val node = onEdt { buildHierarchy(window).find(tag) } ?: return false
         val target = inputTargetComponent(window)
         val x = (node.x + node.width / 2).toInt()
         val y = (node.y + node.height / 2).toInt()
@@ -340,7 +358,7 @@ object DesktopBridgeServer {
      * dispatching anything if [anchorTag] isn't known yet.
      */
     private fun scroll(anchorTag: String, deltaY: Int, window: Window): Boolean {
-        val node = buildHierarchy(window).find(anchorTag) ?: return false
+        val node = onEdt { buildHierarchy(window).find(anchorTag) } ?: return false
         val target = inputTargetComponent(window)
         val x = (node.x + node.width / 2).toInt()
         val y = (node.y + node.height / 2).toInt()
@@ -428,9 +446,17 @@ object DesktopBridgeServer {
      * (a common way to clear a field) would be a no-op, since pasting nothing inserts nothing.
      */
     private fun pasteText(text: String, window: Window) {
-        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
         val target = inputTargetComponent(window)
         sendKeyChord(target, KeyEvent.VK_CONTROL, KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK)
+        // Gives Compose's own state/recomposition pipeline a moment to actually apply the
+        // select-all before the paste arrives — invokeAndWait only guarantees the KEY_RELEASED
+        // was *dispatched*, not that Compose's resulting selection state change has been applied
+        // yet (same class of race as onEdt's own doc). Without this, setText's own select-all
+        // intermittently loses the race and the paste appends instead of replacing (issue #23):
+        // measured at a 10-42% failure rate before this, ~0% after, across repeated 100-iteration
+        // stress runs (see BridgeDriverStressTest).
+        Thread.sleep(SELECT_ALL_SETTLE_MS)
+        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
         sendKeyChord(target, KeyEvent.VK_CONTROL, KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK)
     }
 }

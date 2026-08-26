@@ -5,41 +5,77 @@ import com.cramsan.cmpbridge.driver.DesktopAppProcess
 import com.cramsan.cmpbridge.driver.DesktopBridgeDriver
 import com.cramsan.cmpbridge.driver.ManagedBridgeDriver
 import com.cramsan.cmpbridge.driver.TextComparator
+import com.cramsan.cmpbridge.driver.WasmDevServerProcess
+import com.cramsan.cmpbridge.driver.WebBridgeDriver
 import com.cramsan.cmpbridge.find
-import kotlin.test.Test
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.Timeout
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertTrue
 
 /**
- * Stress-tests each `BridgeDriver` core operation against a single already-launched desktop app
- * instance, with no retry wrapper, to measure how often it silently has no effect (issue #23).
- * This is the baseline every candidate fix gets compared against — a real before/after number
- * instead of eyeballing a handful of manual runs.
- *
- * Each test is a diagnostic, not (yet) a pass/fail regression test: there's no fix in place yet,
- * so each one only asserts a sanity bound (the operation isn't *completely* dead) and reports the
- * actual miss count/rate. Once #23 has a fix, tighten the assertions to something close to 0.
+ * Every target this suite can drive — add a case here (plus [BridgeDriverStressTest.launch]) to
+ * cover a new platform.
  */
+enum class Target { DESKTOP, WEB }
+
+/**
+ * Stress-tests each `BridgeDriver` core operation against a single already-launched app instance,
+ * per [Target], with no retry wrapper, to measure how often it silently has no effect (issue #23).
+ * This is the baseline every candidate fix gets compared against — a real before/after number
+ * instead of eyeballing a handful of manual runs. Written once against the `BridgeDriver`
+ * interface so a future target only needs a [launch] case, not a parallel test class.
+ *
+ * Where a scenario genuinely can't run on a target — `setText` on web, since `name_field`
+ * permanently reports zero bounds there (see ARCHITECTURE.md's "Known platform gaps") — the test
+ * is skipped for that target with a reason, not silently omitted or forced to fail.
+ *
+ * Each test is a diagnostic, not (yet) a pass/fail regression test for every target: there's no
+ * fix in place yet for web's own characteristics, so each one only asserts a sanity bound (the
+ * operation isn't *completely* dead) and reports the actual miss count/rate.
+ *
+ * Every miss burns a full settle-timeout wait, so a genuinely broken operation (or a test-design
+ * bug like an unexpected overlay swallowing clicks) can silently balloon to minutes rather than
+ * fail fast. The class-level [Timeout] turns that into a clear, bounded failure instead of an
+ * open-ended wait — 3 minutes is generous for legitimate web dev-server startup plus a real but
+ * partial miss rate, while still catching an actual hang.
+ */
+@Timeout(value = 3, unit = TimeUnit.MINUTES)
 class BridgeDriverStressTest {
-    @Test
-    fun `click() drop rate at the same location`() {
-        withApp { d -> measureClickDropRate(d, label = "same location") { } }
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Target::class)
+    fun `click() drop rate at the same location`(target: Target) {
+        withApp(target) { d -> measureClickDropRate(target, d, label = "same location") { } }
     }
 
-    @Test
-    fun `click() drop rate when alternating with a click at a different location`() {
-        withApp { d ->
-            // increment_button and name_field sit at different coordinates — real usage clicks
-            // different elements across a session, and click() never sends a MOUSE_EXITED at the
-            // old position before the next click's MOUSE_ENTERED at the new one.
-            measureClickDropRate(d, label = "alternating location") { d.click("name_field") }
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Target::class)
+    fun `click() drop rate when alternating with a click at a different location`(target: Target) {
+        withApp(target) { d ->
+            // increment_button and item_0 sit at different coordinates and both have real bounds
+            // on every target — real usage clicks different elements across a session, and
+            // desktop's click() never sends a MOUSE_EXITED at the old position before the next
+            // click's MOUSE_ENTERED at the new one. item_0 has no click action of its own (a
+            // list row, not a button), so clicking it can't have a side effect that interferes
+            // with the next click — unlike favorite_fruit_field, which opens a dropdown overlay
+            // that then swallows the following click on increment_button entirely.
+            measureClickDropRate(target, d, label = "alternating location") { d.click("item_0") }
         }
     }
 
-    @Test
-    fun `setText() drop rate over a tight loop`() {
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Target::class)
+    fun `setText() drop rate over a tight loop`(target: Target) {
+        assumeTrue(
+            target != Target.WEB,
+            "name_field permanently reports zero bounds on web " +
+                "(ARCHITECTURE.md's Known platform gaps) — not drivable there yet",
+        )
         // #23's own repro was specifically setText/pasteText cycles (click + clipboard paste +
         // Ctrl+A key chords), not a plain click() — closer to the actual reported failure shape.
-        withApp { d ->
+        withApp(target) { d ->
             var misses = 0
             val missedAtIteration = mutableListOf<Int>()
             repeat(SETTEXT_ITERATIONS) { i ->
@@ -48,36 +84,39 @@ class BridgeDriverStressTest {
                 if (!pollUntil(SETTEXT_SETTLE_MS) { d.getBounds("greeting_text")?.text == "Hello, $expected!" }) {
                     misses++
                     missedAtIteration += i
+                    System.err.println("=== miss at $i: greeting=${d.getBounds("greeting_text")?.text} ===")
                 }
             }
-            report("setText()", misses, SETTEXT_ITERATIONS, missedAtIteration)
+            report("setText()", target, misses, SETTEXT_ITERATIONS, missedAtIteration)
         }
     }
 
-    @Test
-    fun `scroll() drop rate over a tight loop`() {
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Target::class)
+    fun `scroll() drop rate over a tight loop`(target: Target) {
         // Alternates direction each call so the tracked row oscillates within the middle of the
         // list rather than pinning at an edge, where a real "no more room to scroll" boundary
         // would be indistinguishable from a dropped scroll.
-        withApp { d ->
+        withApp(target) { d ->
             var misses = 0
             val missedAtIteration = mutableListOf<Int>()
+            val delta = scrollDelta(target)
             repeat(SCROLL_ITERATIONS) { i ->
                 val before = d.getBounds(SCROLL_TRACK_TAG)?.y
-                val deltaY = if (i % 2 == 0) SCROLL_DELTA else -SCROLL_DELTA
-                d.scroll("item_list", deltaY)
+                d.scroll("item_list", if (i % 2 == 0) delta else -delta)
                 if (!pollUntil(SCROLL_SETTLE_MS) { d.getBounds(SCROLL_TRACK_TAG)?.y != before }) {
                     misses++
                     missedAtIteration += i
                 }
             }
-            report("scroll()", misses, SCROLL_ITERATIONS, missedAtIteration)
+            report("scroll()", target, misses, SCROLL_ITERATIONS, missedAtIteration)
         }
     }
 
-    @Test
-    fun `getHierarchy() failure rate over a tight loop`() {
-        withApp { d ->
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Target::class)
+    fun `getHierarchy() failure rate over a tight loop`(target: Target) {
+        withApp(target) { d ->
             var failures = 0
             val failedAtIteration = mutableListOf<Int>()
             repeat(READ_ITERATIONS) { i ->
@@ -87,13 +126,14 @@ class BridgeDriverStressTest {
                     failedAtIteration += i
                 }
             }
-            report("getHierarchy()", failures, READ_ITERATIONS, failedAtIteration)
+            report("getHierarchy()", target, failures, READ_ITERATIONS, failedAtIteration)
         }
     }
 
-    @Test
-    fun `screenshot() failure rate over a tight loop`() {
-        withApp { d ->
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Target::class)
+    fun `screenshot() failure rate over a tight loop`(target: Target) {
+        withApp(target) { d ->
             var failures = 0
             val failedAtIteration = mutableListOf<Int>()
             repeat(SCREENSHOT_ITERATIONS) { i ->
@@ -105,22 +145,45 @@ class BridgeDriverStressTest {
                     failedAtIteration += i
                 }
             }
-            report("screenshot()", failures, SCREENSHOT_ITERATIONS, failedAtIteration)
+            report("screenshot()", target, failures, SCREENSHOT_ITERATIONS, failedAtIteration)
         }
     }
 
-    private fun withApp(block: (BridgeDriver) -> Unit) {
-        val process = DesktopAppProcess.launch("com.cramsan.cmpbridge.sample.MainKt")
-        val driver = runCatching { DesktopBridgeDriver.connect(process.host, process.port) }
-            .getOrElse {
-                process.close()
-                throw it
-            }
-        ManagedBridgeDriver(process, driver).use { d ->
-            // Settle past the documented "first click after launch" miss before measuring.
+    /** Launches [target], connects a driver, waits past the "first interaction" settle, then runs [block]. */
+    private fun withApp(target: Target, block: (BridgeDriver) -> Unit) {
+        launch(target).use { d ->
             d.waitForText("counter_text", TextComparator.Present)
             block(d)
         }
+    }
+
+    /** Launches and connects [target] — the one place a new [Target] case needs to be wired up. */
+    private fun launch(target: Target): ManagedBridgeDriver = when (target) {
+        Target.DESKTOP -> {
+            val process = DesktopAppProcess.launch("com.cramsan.cmpbridge.sample.MainKt")
+            val driver = runCatching { DesktopBridgeDriver.connect(process.host, process.port) }
+                .getOrElse {
+                    process.close()
+                    throw it
+                }
+            ManagedBridgeDriver(process, driver)
+        }
+
+        Target.WEB -> {
+            val process = WasmDevServerProcess.launch(":cmp-bridge-sample")
+            val driver = runCatching { WebBridgeDriver.connect(process.url) }
+                .getOrElse {
+                    process.close()
+                    throw it
+                }
+            ManagedBridgeDriver(process, driver)
+        }
+    }
+
+    /** Scroll units aren't equivalent across platforms (BridgeDriver.scroll's own doc). */
+    private fun scrollDelta(target: Target): Int = when (target) {
+        Target.DESKTOP -> SCROLL_DELTA
+        Target.WEB -> WEB_SCROLL_DELTA
     }
 
     /**
@@ -129,7 +192,7 @@ class BridgeDriverStressTest {
      * `counter_text` failed to advance within [CLICK_SETTLE_MS]. A miss doesn't abort the loop —
      * a single dropped click must not invalidate the rest of the measurement.
      */
-    private fun measureClickDropRate(d: BridgeDriver, label: String, beforeClick: () -> Unit) {
+    private fun measureClickDropRate(target: Target, d: BridgeDriver, label: String, beforeClick: () -> Unit) {
         var misses = 0
         val missedAtIteration = mutableListOf<Int>()
         repeat(CLICK_ITERATIONS) { i ->
@@ -141,7 +204,7 @@ class BridgeDriverStressTest {
                 missedAtIteration += i
             }
         }
-        report("click() ($label)", misses, CLICK_ITERATIONS, missedAtIteration)
+        report("click() ($label)", target, misses, CLICK_ITERATIONS, missedAtIteration)
     }
 
     /** Polls [condition] every [POLL_INTERVAL_MS] until it's true or [timeoutMs] elapses. */
@@ -154,23 +217,24 @@ class BridgeDriverStressTest {
         return condition()
     }
 
-    private fun report(operation: String, misses: Int, total: Int, missedAtIteration: List<Int>) {
+    private fun report(operation: String, target: Target, misses: Int, total: Int, missedAtIteration: List<Int>) {
         val missRate = misses.toDouble() / total
         System.err.println(
-            "=== $operation drop rate: $misses/$total (${"%.1f".format(missRate * 100)}%) " +
+            "=== $operation [$target] drop rate: $misses/$total (${"%.1f".format(missRate * 100)}%) " +
                 "missed at iterations: $missedAtIteration ===",
         )
-        assertTrue(missRate < 1.0, "Every single $operation call failed — the app likely isn't responding at all")
+        assertTrue(missRate < 1.0, "Every single $operation call failed on $target — the app likely isn't responding")
     }
 
     private companion object {
         const val CLICK_ITERATIONS = 100
-        const val CLICK_SETTLE_MS = 500L
+        const val CLICK_SETTLE_MS = 1_500L
         const val SETTEXT_ITERATIONS = 100
         const val SETTEXT_SETTLE_MS = 1_500L
         const val SCROLL_ITERATIONS = 100
-        const val SCROLL_SETTLE_MS = 500L
+        const val SCROLL_SETTLE_MS = 1_500L
         const val SCROLL_DELTA = 5
+        const val WEB_SCROLL_DELTA = 300
         const val SCROLL_TRACK_TAG = "item_5"
         const val READ_ITERATIONS = 200
         const val SCREENSHOT_ITERATIONS = 50
