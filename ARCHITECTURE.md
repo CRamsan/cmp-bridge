@@ -247,3 +247,8 @@ capability differences to poll/branch around, not as bugs in the caller's own te
 - **Connect and launch are separate concerns.** `*BridgeDriver.connect` never owns a
   process; `*Process.launch` never speaks the bridge protocol. `ManagedBridgeDriver` is
   the only place the two are composed. New driver/process pairs should keep that split.
+- **Tag-only lookups, deliberately no coordinate/text-based fallback.** Coordinates are
+  brittle across locale/layout/theme changes, and text is ambiguous (duplicate labels)
+  and localization-fragile. A stable `testTag` keeps the semantics tree the single
+  source of truth for what can be driven — at the cost of up-front instrumentation on a
+  previously-untagged app (see the README's "Using it in your own app").

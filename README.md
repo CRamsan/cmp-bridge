@@ -117,6 +117,12 @@ accessibility-based test tool:
 Button(onClick = { ... }, modifier = Modifier.testTag("submit_button")) { ... }
 ```
 
+> **Expect an up-front instrumentation pass on an untagged app.** There's no
+> coordinate/text-based fallback (see [ARCHITECTURE.md](ARCHITECTURE.md) for why), so
+> every element you need to drive needs a `testTag` first. One real-world app needed
+> ~25 tags for a single complex form — budget per-screen instrumentation time before
+> your first test, not tags added one-by-one as tests fail to find things.
+
 **3. Drive it from a test**, via `cmp-bridge-driver`:
 
 ```kotlin
