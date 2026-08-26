@@ -123,6 +123,10 @@ Button(onClick = { ... }, modifier = Modifier.testTag("submit_button")) { ... }
 > ~25 tags for a single complex form — budget per-screen instrumentation time before
 > your first test, not tags added one-by-one as tests fail to find things.
 
+**Driving a dropdown/select**: tag the field, then tag each option
+`"${fieldTag}_option_$index"` — see `cmp-bridge-sample`'s `App.kt`/`DemoScenarioTest`
+(`favorite_fruit_field`) for a complete example.
+
 **3. Drive it from a test**, via `cmp-bridge-driver`:
 
 ```kotlin

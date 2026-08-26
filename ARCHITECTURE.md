@@ -225,6 +225,9 @@ gaps are tracked rather than silently swallowed:
 - A `BasicTextField`'s bounds can permanently read as zero in the web accessibility DOM
   even though its live text is still correct — `DemoScenarioTest`'s web case documents
   exactly which core operations it does and doesn't exercise as a result.
+- `ExposedDropdownMenu` options are readable on web but not clickable — the click lands
+  on the right element, Compose just never registers it. `DemoScenarioTest`'s web case
+  only checks the field's default state as a result.
 
 Callers driving both platforms with the same test code should treat these as platform
 capability differences to poll/branch around, not as bugs in the caller's own test.

@@ -5,6 +5,7 @@ import com.cramsan.cmpbridge.driver.BridgeTimeoutException
 import com.cramsan.cmpbridge.driver.DesktopAppProcess
 import com.cramsan.cmpbridge.driver.DesktopBridgeDriver
 import com.cramsan.cmpbridge.driver.ManagedBridgeDriver
+import com.cramsan.cmpbridge.driver.TagVisibility
 import com.cramsan.cmpbridge.driver.TextComparator
 import com.cramsan.cmpbridge.driver.WasmDevServerProcess
 import com.cramsan.cmpbridge.driver.WebBridgeDriver
@@ -72,6 +73,11 @@ class DemoScenarioTest {
             }
             assertTrue(found != null, "Scrolled $attempts times but \"$targetTag\" never appeared")
 
+            // Dropdown recipe (issue #11) — see README's "Driving a dropdown/select".
+            assertEquals("Selected: none", d.waitForText("favorite_fruit_text", TextComparator.Present).text)
+            d.clickUntilTagVisible("favorite_fruit_field", "favorite_fruit_field_option_0")
+            d.clickUntilText("favorite_fruit_field_option_1", "favorite_fruit_text", "Selected: Banana")
+
             assertValidPng(d.screenshot())
         }
     }
@@ -113,6 +119,11 @@ class DemoScenarioTest {
             }
             assertTrue(found != null, "Scrolled $attempts times but \"$targetTag\" never appeared")
 
+            // Not exercised on web: selecting a dropdown option — see ARCHITECTURE.md's "Known
+            // platform gaps".
+            val favoriteFruit = d.getHierarchy().find("favorite_fruit_text")
+            assertEquals("Selected: none", favoriteFruit?.text)
+
             assertValidPng(d.screenshot())
         }
     }
@@ -133,6 +144,27 @@ class DemoScenarioTest {
             click(clickTag)
             try {
                 waitForText(readTag, TextComparator.Equals(expected), timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
+                return
+            } catch (e: BridgeTimeoutException) {
+                if (attempt == maxAttempts - 1) throw e
+            }
+        }
+    }
+
+    /**
+     * Clicks [clickTag], re-clicking up to [maxAttempts] times until [readTag] becomes visible —
+     * mirrors [clickUntilText]'s retry for the same reason, for the "opens a menu/dialog" case
+     * where there's no existing tag whose *text* changes, only a new tag that appears.
+     */
+    private fun BridgeDriver.clickUntilTagVisible(
+        clickTag: String,
+        readTag: String,
+        maxAttempts: Int = MAX_CLICK_ATTEMPTS,
+    ) {
+        repeat(maxAttempts) { attempt ->
+            click(clickTag)
+            try {
+                waitForTagVisibility(readTag, TagVisibility.VISIBLE, timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
                 return
             } catch (e: BridgeTimeoutException) {
                 if (attempt == maxAttempts - 1) throw e

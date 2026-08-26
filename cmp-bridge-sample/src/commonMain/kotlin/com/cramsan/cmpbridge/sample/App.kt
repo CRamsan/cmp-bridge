@@ -9,9 +9,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,9 +82,55 @@ fun App() {
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                FruitDropdown()
             }
         }
     }
+}
+
+/** Dropdown tagging recipe (issue #11) — see README's "Driving a dropdown/select". */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FruitDropdown() {
+    val fruits = listOf("Apple", "Banana", "Cherry")
+    var expanded by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<String?>(null) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        TextField(
+            value = selected ?: "",
+            onValueChange = {},
+            readOnly = true,
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .testTag("favorite_fruit_field"),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            fruits.forEachIndexed { index, fruit ->
+                DropdownMenuItem(
+                    text = { Text(fruit) },
+                    onClick = {
+                        selected = fruit
+                        expanded = false
+                    },
+                    modifier = Modifier.testTag("favorite_fruit_field_option_$index"),
+                )
+            }
+        }
+    }
+    Text(
+        text = "Selected: ${selected ?: "none"}",
+        modifier = Modifier.testTag("favorite_fruit_text"),
+    )
 }
 
 @Composable
