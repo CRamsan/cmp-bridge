@@ -36,7 +36,11 @@ kotlin {
         androidResources.enable = true
     }
 
-    jvm()
+    jvm {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(findProperty("libraryJvmTarget") as String))
+        }
+    }
 
     wasmJs {
         browser()

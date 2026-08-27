@@ -7,6 +7,21 @@ plugins {
 
 description = "BridgeDriver client for driving a running Compose Multiplatform app's UI bridge directly."
 
+// Deliberately lower than the jdkVersion toolchain that builds this project — see gradle.properties's
+// own comment on libraryJvmTarget (issue #13). java{} must match compileKotlin's target too, or
+// Gradle's own Java/Kotlin task consistency check fails the build even with no Java sources here.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(findProperty("libraryJvmTarget") as String))
+    }
+}
+
+java {
+    val libraryJvmVersion = JavaVersion.toVersion(findProperty("libraryJvmTarget") as String)
+    sourceCompatibility = libraryJvmVersion
+    targetCompatibility = libraryJvmVersion
+}
+
 detekt {
     buildUponDefaultConfig = true
     config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
