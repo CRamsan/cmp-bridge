@@ -132,10 +132,14 @@ one*:
 
 - `DesktopBridgeDriver.connect` / `WebBridgeDriver.connect` only ever attach — `close()`
   never touches a process.
-- `DesktopAppProcess.launch(mainClass)` and `WasmDevServerProcess.launch(gradleModulePath)`
-  own a subprocess (the app itself, or the wasmJs webpack dev server) — launching with
-  an isolated `user.home`, polling until its port is connectable, and tearing it down on
-  `close()`.
+- `DesktopAppProcess.launch(mainClass)` and `WasmDevServerProcess.launch(command,
+  workingDir)` own a subprocess (the app itself, or a wasmJs dev server) — both poll
+  until the port is connectable and tear it down on `close()`. `DesktopAppProcess` is
+  opinionated (runs `mainClass` via `java -cp`, with an isolated `user.home`);
+  `WasmDevServerProcess` isn't — it has no notion of Gradle or a repo root, and just
+  runs whatever `command` it's handed (issue #14 — the previous
+  `launch(gradleModulePath)` needed an undocumented `e2e.repoRoot` system property just
+  to locate `gradlew` internally).
 - `ManagedBridgeDriver(resource, driver)` composes the two by delegation (`BridgeDriver
   by driver`) so a caller that launched its own app gets single-call teardown (driver
   first, then the process) instead of managing both lifecycles by hand.

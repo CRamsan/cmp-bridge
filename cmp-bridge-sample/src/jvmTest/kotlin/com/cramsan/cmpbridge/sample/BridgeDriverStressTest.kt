@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
+import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertTrue
 
@@ -170,7 +171,7 @@ class BridgeDriverStressTest {
         }
 
         Target.WEB -> {
-            val process = WasmDevServerProcess.launch(":cmp-bridge-sample")
+            val process = launchWasmDevServer()
             val driver = runCatching { WebBridgeDriver.connect(process.url) }
                 .getOrElse {
                     process.close()
@@ -178,6 +179,25 @@ class BridgeDriverStressTest {
                 }
             ManagedBridgeDriver(process, driver)
         }
+    }
+
+    /**
+     * Reference recipe for issue #14: `WasmDevServerProcess.launch` has no built-in notion of
+     * Gradle or a repo root — it just runs whatever command it's handed. `e2e.repoRoot` is this
+     * module's own convention (wired in `build.gradle.kts`) for getting the repo root into the
+     * test JVM, not something the library reads itself.
+     */
+    private fun launchWasmDevServer(): WasmDevServerProcess {
+        val repoRoot = System.getProperty("e2e.repoRoot")
+            ?: error("e2e.repoRoot not set — run via the jvmTest Gradle task in this module")
+        return WasmDevServerProcess.launch(
+            command = listOf(
+                File(repoRoot, "gradlew").absolutePath,
+                ":cmp-bridge-sample:wasmJsBrowserDevelopmentRun",
+                "--console=plain",
+            ),
+            workingDir = File(repoRoot),
+        )
     }
 
     /** Scroll units aren't equivalent across platforms (BridgeDriver.scroll's own doc). */

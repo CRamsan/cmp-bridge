@@ -61,7 +61,9 @@ compose.desktop {
 }
 
 tasks.named<Test>("jvmTest") {
-    // WasmDevServerProcess.launch shells out to this repo's own gradlew and needs its location.
+    // This module's own convention for getting the repo root into the test JVM — DemoScenarioTest
+    // and BridgeDriverStressTest read it themselves to build the command they hand to
+    // WasmDevServerProcess.launch, which has no notion of Gradle or a repo root of its own (#14).
     systemProperty("e2e.repoRoot", rootProject.projectDir.absolutePath)
 }
 

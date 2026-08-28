@@ -5,7 +5,13 @@ import java.net.Socket
 import java.util.concurrent.TimeUnit
 
 /**
- * Owns a wasmJs dev-server subprocess — nothing more.
+ * Owns an arbitrary dev-server subprocess — nothing more. cmp-bridge-driver has no opinion on how
+ * a wasmJs dev server gets started (a Gradle task, an npm script, a Docker container, ...); the
+ * caller supplies the exact [launch] command and working directory to run, the same as they'd
+ * type at a terminal. (Issue #14: the previous Gradle-module-path-specific signature needed an
+ * undocumented `e2e.repoRoot` system property just to locate `gradlew` — pushing command
+ * construction to the caller, who already knows their own repo layout, removes the need for that
+ * discovery entirely instead of just documenting or auto-deriving it.)
  *
  * Pair with [WebBridgeDriver.connect] to actually drive the app it serves — directly, or through
  * [ManagedBridgeDriver] for single-call teardown.
@@ -34,27 +40,21 @@ class WasmDevServerProcess private constructor(
         private const val DEFAULT_PORT = 8080
 
         /**
-         * [gradleModulePath] is the app's own `launcher-web` module, e.g.
-         * `":app:launcher-web"` — its `wasmJsBrowserDevelopmentRun` task is run to
-         * bring up the dev server. [port] defaults to the standard Kotlin/JS webpack-dev-server
-         * port; override only if an app's `webpack.config.d` pins a different one.
+         * Runs [command] in [workingDir] — e.g.
+         * `listOf(File(repoRoot, "gradlew").absolutePath, ":app:wasmJsBrowserDevelopmentRun", "--console=plain")`
+         * — and waits for something to start listening on [port], the standard Kotlin/JS
+         * webpack-dev-server port; override only if an app's `webpack.config.d` pins a different
+         * one. `cmp-bridge-sample`'s own test code is a complete, working example of building
+         * this command from a Gradle-supplied repo root.
          */
         // Deliberate catch-all: any readiness failure gets wrapped with the dev server's own log
         // path attached below, rather than surfacing a bare exception with nowhere to look.
         @Suppress("TooGenericExceptionCaught")
-        fun launch(gradleModulePath: String, port: Int = DEFAULT_PORT): WasmDevServerProcess {
-            val repoRoot =
-                System.getProperty("e2e.repoRoot")
-                    ?: error("e2e.repoRoot not set — run via the `test` Gradle task in this module")
-
+        fun launch(command: List<String>, workingDir: File, port: Int = DEFAULT_PORT): WasmDevServerProcess {
             val logFile = File.createTempFile("cmp-bridge-web-e2e", ".log").apply { deleteOnExit() }
-            val gradlew = File(repoRoot, "gradlew").absolutePath
             val process =
-                ProcessBuilder(
-                    gradlew,
-                    "$gradleModulePath:wasmJsBrowserDevelopmentRun",
-                    "--console=plain",
-                ).directory(File(repoRoot))
+                ProcessBuilder(command)
+                    .directory(workingDir)
                     .redirectErrorStream(true)
                     .redirectOutput(logFile)
                     .start()
