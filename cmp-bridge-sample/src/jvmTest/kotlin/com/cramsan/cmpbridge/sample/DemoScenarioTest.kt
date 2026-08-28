@@ -10,6 +10,7 @@ import com.cramsan.cmpbridge.driver.TextComparator
 import com.cramsan.cmpbridge.driver.WasmDevServerProcess
 import com.cramsan.cmpbridge.driver.WebBridgeDriver
 import com.cramsan.cmpbridge.find
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -84,7 +85,7 @@ class DemoScenarioTest {
 
     @Test
     fun `web app is drivable through the bridge for what this Compose Multiplatform version supports`() {
-        val process = WasmDevServerProcess.launch(":cmp-bridge-sample")
+        val process = launchWasmDevServer()
         val driver = runCatching { WebBridgeDriver.connect(process.url) }
             .getOrElse {
                 process.close()
@@ -126,6 +127,25 @@ class DemoScenarioTest {
 
             assertValidPng(d.screenshot())
         }
+    }
+
+    /**
+     * Reference recipe for issue #14: `WasmDevServerProcess.launch` has no built-in notion of
+     * Gradle or a repo root — it just runs whatever command it's handed. `e2e.repoRoot` is this
+     * module's own convention (wired in `build.gradle.kts`) for getting the repo root into the
+     * test JVM, not something the library reads itself.
+     */
+    private fun launchWasmDevServer(): WasmDevServerProcess {
+        val repoRoot = System.getProperty("e2e.repoRoot")
+            ?: error("e2e.repoRoot not set — run via the jvmTest Gradle task in this module")
+        return WasmDevServerProcess.launch(
+            command = listOf(
+                File(repoRoot, "gradlew").absolutePath,
+                ":cmp-bridge-sample:wasmJsBrowserDevelopmentRun",
+                "--console=plain",
+            ),
+            workingDir = File(repoRoot),
+        )
     }
 
     private fun assertValidPng(png: ByteArray) {

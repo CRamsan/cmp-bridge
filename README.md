@@ -139,8 +139,10 @@ ManagedBridgeDriver(process, driver).use { d ->
 ```
 
 `WasmDevServerProcess` + `WebBridgeDriver.connect(url)` is the equivalent pair for a
-wasmJs app. `cmp-bridge-sample`'s `DemoScenarioTest` is a complete, working example of
-both.
+wasmJs app. `WasmDevServerProcess.launch` takes a plain `command`/`workingDir` — it has
+no built-in notion of Gradle or a repo root, so it's on the caller to build that command
+(`cmp-bridge-sample`'s `DemoScenarioTest` is a complete, working example of both, including
+that part).
 
 ## Trying it out with the sample app
 
