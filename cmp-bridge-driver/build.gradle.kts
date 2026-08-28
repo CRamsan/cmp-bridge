@@ -43,6 +43,24 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:_")
 }
 
+// Ensures Playwright's Chromium is present before WebBridgeDriverTest runs, on any machine. A
+// fresh machine (every CI runner) has nothing cached, and WebBridgeDriver.connect() deliberately
+// fails fast rather than blocking on a first-time install (see its own KDoc) — fine for a real
+// caller who can retry, but WebBridgeDriverTest never does, so it fails every single time on a
+// machine that's never run it before. Runs the exact same CLI invocation WebBridgeDriver's own
+// install path uses internally, so it can't drift to a different Chromium build.
+val installPlaywrightChromium by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Installs Playwright's Chromium build, if not already cached."
+    mainClass.set("com.microsoft.playwright.CLI")
+    args("install", "chromium")
+    classpath = sourceSets.main.get().runtimeClasspath
+}
+
+tasks.test {
+    dependsOn(installPlaywrightChromium)
+}
+
 // Maven Central publishing — see RELEASING.md. Duplicated verbatim across every published module
 // (matching this repo's own house style for small, must-stay-in-sync blocks — see the
 // BridgeExplorerOptions duplication between cmp-bridge-http-server/cmp-bridge-mcp-server): Gradle

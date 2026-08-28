@@ -23,6 +23,15 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # cmp-bridge-driver's own build now installs Playwright's Chromium before running tests
+      # (WebBridgeDriverTest needs it — see cmp-bridge-driver/build.gradle.kts), so this only saves
+      # re-downloading the ~500 MiB browser on every run; it isn't required for correctness.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('versions.properties') }}
+
       # cmp-bridge-sample's DemoScenarioTest launches a real desktop app subprocess and drives it
       # through a real ComposeWindow/AWT input events (see CONTRIBUTING.md) — ubuntu-latest runners
       # have no X server at all, so that subprocess fails to open a window without one. Xvfb is a
