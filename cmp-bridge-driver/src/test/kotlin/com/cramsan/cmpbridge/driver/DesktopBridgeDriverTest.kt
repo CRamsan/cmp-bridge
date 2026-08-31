@@ -2,6 +2,7 @@ package com.cramsan.cmpbridge.driver
 
 import com.cramsan.cmpbridge.BridgeCommand
 import com.cramsan.cmpbridge.BridgeResponse
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
@@ -13,6 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -61,7 +63,7 @@ class DesktopBridgeDriverTest {
     }
 
     @Test
-    fun `click on an unknown tag throws UnknownTagException`() {
+    fun `click on an unknown tag throws UnknownTagException`() = runBlocking {
         server = FakeBridgeSocketServer { BridgeResponse.Failure("Unknown tag: my_tag") }
         val driver = DesktopBridgeDriver.connect(port = server!!.port)
 
@@ -72,7 +74,7 @@ class DesktopBridgeDriverTest {
     }
 
     @Test
-    fun `a generic command failure does not surface as UnknownTagException`() {
+    fun `a generic command failure does not surface as UnknownTagException`() = runBlocking {
         server = FakeBridgeSocketServer { BridgeResponse.Failure("boom") }
         val driver = DesktopBridgeDriver.connect(port = server!!.port)
 
@@ -83,7 +85,7 @@ class DesktopBridgeDriverTest {
     }
 
     @Test
-    fun `a connection that closes without responding throws BridgeConnectionException`() {
+    fun `a connection that closes without responding throws BridgeConnectionException`() = runBlocking {
         server = FakeBridgeSocketServer { null }
         val driver = DesktopBridgeDriver.connect(port = server!!.port)
 
@@ -93,7 +95,7 @@ class DesktopBridgeDriverTest {
     }
 
     @Test
-    fun `connect throws BridgeConnectionException when nothing is listening on the port`() {
+    fun `connect throws BridgeConnectionException when nothing is listening on the port`() = runBlocking {
         // No FakeBridgeSocketServer started — pick a port nothing is bound to.
         val unusedPort = ServerSocket(0).use { it.localPort }
 
@@ -103,20 +105,24 @@ class DesktopBridgeDriverTest {
     }
 
     @Test
-    fun `connect defaults to BridgeDriver's own default timeout and poll interval`() {
+    fun `connect defaults to BridgeDriver's own default timeout and poll interval`() = runBlocking {
         server = FakeBridgeSocketServer { BridgeResponse.Failure("boom") }
         val driver = DesktopBridgeDriver.connect(port = server!!.port)
 
-        assertEquals(BridgeDriver.DEFAULT_TIMEOUT_MS, driver.defaultTimeoutMs)
-        assertEquals(BridgeDriver.DEFAULT_POLL_INTERVAL_MS, driver.pollIntervalMs)
+        assertEquals(BridgeDriver.DEFAULT_TIMEOUT, driver.defaultTimeout)
+        assertEquals(BridgeDriver.DEFAULT_POLL_INTERVAL, driver.pollInterval)
     }
 
     @Test
-    fun `connect honors custom defaultTimeoutMs and pollIntervalMs`() {
+    fun `connect honors custom defaultTimeout and pollInterval`() = runBlocking {
         server = FakeBridgeSocketServer { BridgeResponse.Failure("boom") }
-        val driver = DesktopBridgeDriver.connect(port = server!!.port, defaultTimeoutMs = 777L, pollIntervalMs = 33L)
+        val driver = DesktopBridgeDriver.connect(
+            port = server!!.port,
+            defaultTimeout = 777.milliseconds,
+            pollInterval = 33.milliseconds,
+        )
 
-        assertEquals(777L, driver.defaultTimeoutMs)
-        assertEquals(33L, driver.pollIntervalMs)
+        assertEquals(777.milliseconds, driver.defaultTimeout)
+        assertEquals(33.milliseconds, driver.pollInterval)
     }
 }

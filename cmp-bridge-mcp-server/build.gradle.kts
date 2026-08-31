@@ -18,6 +18,9 @@ detekt {
 dependencies {
     api(project(":cmp-bridge-driver"))
 
+    // Already transitive via cmp-bridge-driver's api() and the MCP SDK, but this module uses
+    // runBlocking/CompletableDeferred directly, so it's declared explicitly too.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:_")
     implementation("io.modelcontextprotocol:kotlin-sdk:_")
     implementation("org.jetbrains.kotlinx:kotlinx-io-core:_")
     implementation("com.github.ajalt.clikt:clikt:_")

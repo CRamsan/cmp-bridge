@@ -10,10 +10,13 @@ import com.cramsan.cmpbridge.driver.TextComparator
 import com.cramsan.cmpbridge.driver.WasmDevServerProcess
 import com.cramsan.cmpbridge.driver.WebBridgeDriver
 import com.cramsan.cmpbridge.find
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Drives the [App] sample screen through [BridgeDriver] on both platforms — desktop over the
@@ -24,7 +27,7 @@ import kotlin.test.assertTrue
  */
 class DemoScenarioTest {
     @Test
-    fun `desktop app is fully drivable through the bridge`() {
+    fun `desktop app is fully drivable through the bridge`() = runBlocking {
         val process = DesktopAppProcess.launch("com.cramsan.cmpbridge.sample.MainKt")
         // connect() is evaluated as a constructor argument, so if it throws, nothing has wrapped
         // `process` for cleanup yet — close it explicitly or a failed connect leaks the process.
@@ -84,7 +87,7 @@ class DemoScenarioTest {
     }
 
     @Test
-    fun `web app is drivable through the bridge for what this Compose Multiplatform version supports`() {
+    fun `web app is drivable through the bridge for what this Compose Multiplatform version supports`() = runBlocking {
         val process = launchWasmDevServer()
         val driver = runCatching { WebBridgeDriver.connect(process.url) }
             .getOrElse {
@@ -135,7 +138,7 @@ class DemoScenarioTest {
      * module's own convention (wired in `build.gradle.kts`) for getting the repo root into the
      * test JVM, not something the library reads itself.
      */
-    private fun launchWasmDevServer(): WasmDevServerProcess {
+    private suspend fun launchWasmDevServer(): WasmDevServerProcess {
         val repoRoot = System.getProperty("e2e.repoRoot")
             ?: error("e2e.repoRoot not set — run via the jvmTest Gradle task in this module")
         return WasmDevServerProcess.launch(
@@ -154,7 +157,7 @@ class DemoScenarioTest {
     }
 
     /** Clicks [clickTag], re-clicking up to [maxAttempts] times until [readTag] shows [expected]. */
-    private fun BridgeDriver.clickUntilText(
+    private suspend fun BridgeDriver.clickUntilText(
         clickTag: String,
         readTag: String,
         expected: String,
@@ -163,7 +166,7 @@ class DemoScenarioTest {
         repeat(maxAttempts) { attempt ->
             click(clickTag)
             try {
-                waitForText(readTag, TextComparator.Equals(expected), timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
+                waitForText(readTag, TextComparator.Equals(expected), timeout = CLICK_SETTLE_TIMEOUT)
                 return
             } catch (e: BridgeTimeoutException) {
                 if (attempt == maxAttempts - 1) throw e
@@ -176,7 +179,7 @@ class DemoScenarioTest {
      * mirrors [clickUntilText]'s retry for the same reason, for the "opens a menu/dialog" case
      * where there's no existing tag whose *text* changes, only a new tag that appears.
      */
-    private fun BridgeDriver.clickUntilTagVisible(
+    private suspend fun BridgeDriver.clickUntilTagVisible(
         clickTag: String,
         readTag: String,
         maxAttempts: Int = MAX_CLICK_ATTEMPTS,
@@ -184,7 +187,7 @@ class DemoScenarioTest {
         repeat(maxAttempts) { attempt ->
             click(clickTag)
             try {
-                waitForTagVisibility(readTag, TagVisibility.VISIBLE, timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
+                waitForTagVisibility(readTag, TagVisibility.VISIBLE, timeout = CLICK_SETTLE_TIMEOUT)
                 return
             } catch (e: BridgeTimeoutException) {
                 if (attempt == maxAttempts - 1) throw e
@@ -198,7 +201,7 @@ class DemoScenarioTest {
      * input delivery here occasionally needs a retry independent of whether the operation itself
      * is correct.
      */
-    private fun BridgeDriver.setTextUntilText(
+    private suspend fun BridgeDriver.setTextUntilText(
         tag: String,
         text: String,
         readTag: String,
@@ -208,7 +211,7 @@ class DemoScenarioTest {
         repeat(maxAttempts) { attempt ->
             setText(tag, text)
             try {
-                waitForText(readTag, TextComparator.Equals(expected), timeoutMs = CLICK_SETTLE_TIMEOUT_MS)
+                waitForText(readTag, TextComparator.Equals(expected), timeout = CLICK_SETTLE_TIMEOUT)
                 return
             } catch (e: BridgeTimeoutException) {
                 if (attempt == maxAttempts - 1) throw e
@@ -221,7 +224,7 @@ class DemoScenarioTest {
         const val SCROLL_DELTA = 5
         const val WEB_SCROLL_DELTA = 300
         const val MAX_CLICK_ATTEMPTS = 5
-        const val CLICK_SETTLE_TIMEOUT_MS = 3_000L
+        val CLICK_SETTLE_TIMEOUT: Duration = 3.seconds
         const val MIN_PNG_SIZE_BYTES = 100
         val PNG_MAGIC = listOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte())
     }

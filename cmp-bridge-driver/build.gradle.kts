@@ -29,6 +29,9 @@ detekt {
 
 dependencies {
     api(project(":cmp-bridge"))
+    // BridgeDriver's wait methods and BridgeSessionRegistry's `connect` param are suspend —
+    // consumers need this transitively, hence api() rather than implementation().
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:_")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:_")
     implementation("com.microsoft.playwright:playwright:_")
@@ -39,6 +42,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-api:_")
     testImplementation("org.junit.jupiter:junit-jupiter-params:_")
     testImplementation("io.mockk:mockk:_")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:_")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:_")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:_")
 }

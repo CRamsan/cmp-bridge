@@ -8,6 +8,7 @@ import com.cramsan.cmpbridge.driver.TextComparator
 import com.cramsan.cmpbridge.driver.WasmDevServerProcess
 import com.cramsan.cmpbridge.driver.WebBridgeDriver
 import com.cramsan.cmpbridge.find
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.params.ParameterizedTest
@@ -150,8 +151,13 @@ class BridgeDriverStressTest {
         }
     }
 
-    /** Launches [target], connects a driver, waits past the "first interaction" settle, then runs [block]. */
-    private fun withApp(target: Target, block: (BridgeDriver) -> Unit) {
+    /**
+     * Launches [target], connects a driver, waits past the "first interaction" settle, then runs
+     * [block]. Wraps its own suspend calls in [runBlocking] rather than being suspend itself, so
+     * every `@ParameterizedTest` call site above stays unchanged — [block] itself is still plain
+     * blocking code, since it only ever calls [BridgeDriver]'s five non-suspend core operations.
+     */
+    private fun withApp(target: Target, block: (BridgeDriver) -> Unit) = runBlocking {
         launch(target).use { d ->
             d.waitForText("counter_text", TextComparator.Present)
             block(d)
@@ -159,7 +165,7 @@ class BridgeDriverStressTest {
     }
 
     /** Launches and connects [target] — the one place a new [Target] case needs to be wired up. */
-    private fun launch(target: Target): ManagedBridgeDriver = when (target) {
+    private suspend fun launch(target: Target): ManagedBridgeDriver = when (target) {
         Target.DESKTOP -> {
             val process = DesktopAppProcess.launch("com.cramsan.cmpbridge.sample.MainKt")
             val driver = runCatching { DesktopBridgeDriver.connect(process.host, process.port) }
@@ -187,7 +193,7 @@ class BridgeDriverStressTest {
      * module's own convention (wired in `build.gradle.kts`) for getting the repo root into the
      * test JVM, not something the library reads itself.
      */
-    private fun launchWasmDevServer(): WasmDevServerProcess {
+    private suspend fun launchWasmDevServer(): WasmDevServerProcess {
         val repoRoot = System.getProperty("e2e.repoRoot")
             ?: error("e2e.repoRoot not set — run via the jvmTest Gradle task in this module")
         return WasmDevServerProcess.launch(

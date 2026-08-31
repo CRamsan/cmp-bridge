@@ -3,6 +3,11 @@ package com.cramsan.cmpbridge.driver
 import com.cramsan.cmpbridge.BridgeCommand
 import com.cramsan.cmpbridge.BridgeResponse
 import com.cramsan.cmpbridge.HierarchyNode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
@@ -11,6 +16,9 @@ import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.Socket
 import java.util.Base64
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -22,8 +30,8 @@ private val json = Json { ignoreUnknownKeys = true }
 class DesktopBridgeDriver private constructor(
     private val host: String,
     private val port: Int,
-    override val defaultTimeoutMs: Long,
-    override val pollIntervalMs: Long,
+    override val defaultTimeout: Duration,
+    override val pollInterval: Duration,
 ) : BridgeDriver {
     private fun send(command: BridgeCommand): BridgeResponse {
         try {
@@ -78,9 +86,9 @@ class DesktopBridgeDriver private constructor(
 
     companion object {
         // Reachability-probe knobs for connect() itself — unrelated to BridgeDriver's own
-        // waitForTagVisibility/waitForText polling (defaultTimeoutMs/pollIntervalMs below).
-        private const val CONNECT_TIMEOUT_MS = 10_000L
-        private const val POLL_INTERVAL_MS = 250L
+        // waitForTagVisibility/waitForText polling (defaultTimeout/pollInterval below).
+        private val CONNECT_TIMEOUT: Duration = 10.seconds
+        private val POLL_INTERVAL: Duration = 250.milliseconds
 
         /** The exact prefix `DesktopBridgeServer.unknownTag()` always emits for a missing tag. */
         private const val UNKNOWN_TAG_PREFIX = "Unknown tag: "
@@ -90,33 +98,39 @@ class DesktopBridgeDriver private constructor(
 
         /**
          * Attaches to an app instance that's already running with the bridge armed.
-         * [defaultTimeoutMs]/[pollIntervalMs] become this driver's [BridgeDriver.defaultTimeoutMs]/
-         * [BridgeDriver.pollIntervalMs] — override for a slower app/CI environment.
+         * [defaultTimeout]/[pollInterval] become this driver's [BridgeDriver.defaultTimeout]/
+         * [BridgeDriver.pollInterval] — override for a slower app/CI environment.
          */
-        fun connect(
+        suspend fun connect(
             host: String = "127.0.0.1",
             port: Int = 8901,
-            defaultTimeoutMs: Long = BridgeDriver.DEFAULT_TIMEOUT_MS,
-            pollIntervalMs: Long = BridgeDriver.DEFAULT_POLL_INTERVAL_MS,
+            defaultTimeout: Duration = BridgeDriver.DEFAULT_TIMEOUT,
+            pollInterval: Duration = BridgeDriver.DEFAULT_POLL_INTERVAL,
         ): DesktopBridgeDriver {
             waitUntilConnectable(host, port)
-            return DesktopBridgeDriver(host, port, defaultTimeoutMs, pollIntervalMs)
+            return DesktopBridgeDriver(host, port, defaultTimeout, pollInterval)
         }
 
-        private fun waitUntilConnectable(host: String, port: Int) {
-            val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
-            while (System.currentTimeMillis() < deadline) {
-                try {
-                    Socket(host, port).close()
-                    return
-                } catch (_: Exception) {
-                    Thread.sleep(POLL_INTERVAL_MS)
+        private suspend fun waitUntilConnectable(host: String, port: Int) {
+            try {
+                withTimeout(CONNECT_TIMEOUT) {
+                    while (true) {
+                        // IOException only — a blanket Exception catch around a suspending call
+                        // would also swallow this withTimeout's own TimeoutCancellationException.
+                        try {
+                            withContext(Dispatchers.IO) { Socket(host, port).close() }
+                            return@withTimeout
+                        } catch (_: IOException) {
+                            delay(POLL_INTERVAL)
+                        }
+                    }
                 }
+            } catch (_: TimeoutCancellationException) {
+                throw BridgeConnectionException(
+                    "Could not connect to a UI test bridge at $host:$port within $CONNECT_TIMEOUT — " +
+                        "is the app running with CMP_BRIDGE_ENABLED=true (or -DcmpBridge.enabled=true)?",
+                )
             }
-            throw BridgeConnectionException(
-                "Could not connect to a UI test bridge at $host:$port within ${CONNECT_TIMEOUT_MS}ms — " +
-                    "is the app running with CMP_BRIDGE_ENABLED=true (or -DcmpBridge.enabled=true)?",
-            )
         }
     }
 }

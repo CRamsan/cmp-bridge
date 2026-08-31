@@ -1,12 +1,14 @@
 package com.cramsan.cmpbridge.driver
 
 import com.sun.net.httpserver.HttpServer
+import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Serves a static page that fakes Compose Web's accessibility DOM shape (a shadow root containing
@@ -74,7 +76,7 @@ class WebBridgeDriverTest {
     }
 
     @Test
-    fun `click on an unknown tag throws UnknownTagException`() {
+    fun `click on an unknown tag throws UnknownTagException`() = runBlocking {
         pageServer = FakeA11yPageServer()
         driver = WebBridgeDriver.connect(pageServer!!.url)
 
@@ -84,7 +86,7 @@ class WebBridgeDriverTest {
     }
 
     @Test
-    fun `scroll on an unknown tag throws UnknownTagException`() {
+    fun `scroll on an unknown tag throws UnknownTagException`() = runBlocking {
         pageServer = FakeA11yPageServer()
         driver = WebBridgeDriver.connect(pageServer!!.url)
 
@@ -94,7 +96,7 @@ class WebBridgeDriverTest {
     }
 
     @Test
-    fun `click on a zero-bounds tag throws TagNotVisibleException`() {
+    fun `click on a zero-bounds tag throws TagNotVisibleException`() = runBlocking {
         pageServer = FakeA11yPageServer()
         driver = WebBridgeDriver.connect(pageServer!!.url)
 
@@ -104,7 +106,7 @@ class WebBridgeDriverTest {
     }
 
     @Test
-    fun `scroll on a zero-bounds anchor throws TagNotVisibleException`() {
+    fun `scroll on a zero-bounds anchor throws TagNotVisibleException`() = runBlocking {
         pageServer = FakeA11yPageServer()
         driver = WebBridgeDriver.connect(pageServer!!.url)
 
@@ -114,7 +116,7 @@ class WebBridgeDriverTest {
     }
 
     @Test
-    fun `setText replaces existing content rather than appending`() {
+    fun `setText replaces existing content rather than appending`() = runBlocking {
         pageServer = FakeA11yPageServer()
         driver = WebBridgeDriver.connect(pageServer!!.url)
 
@@ -125,7 +127,7 @@ class WebBridgeDriverTest {
     }
 
     @Test
-    fun `setText with an empty string clears existing content rather than a no-op`() {
+    fun `setText with an empty string clears existing content rather than a no-op`() = runBlocking {
         pageServer = FakeA11yPageServer()
         driver = WebBridgeDriver.connect(pageServer!!.url)
 
@@ -138,7 +140,7 @@ class WebBridgeDriverTest {
     }
 
     @Test
-    fun `connect throws BridgeConnectionException when nothing is serving the url`() {
+    fun `connect throws BridgeConnectionException when nothing is serving the url`() = runBlocking {
         val unusedPort = ServerSocket(0).use { it.localPort }
 
         val error = runCatching { WebBridgeDriver.connect("http://127.0.0.1:$unusedPort/") }.exceptionOrNull()
@@ -147,20 +149,24 @@ class WebBridgeDriverTest {
     }
 
     @Test
-    fun `connect defaults to BridgeDriver's own default timeout and poll interval`() {
+    fun `connect defaults to BridgeDriver's own default timeout and poll interval`() = runBlocking {
         pageServer = FakeA11yPageServer()
         driver = WebBridgeDriver.connect(pageServer!!.url)
 
-        assertEquals(BridgeDriver.DEFAULT_TIMEOUT_MS, driver!!.defaultTimeoutMs)
-        assertEquals(BridgeDriver.DEFAULT_POLL_INTERVAL_MS, driver!!.pollIntervalMs)
+        assertEquals(BridgeDriver.DEFAULT_TIMEOUT, driver!!.defaultTimeout)
+        assertEquals(BridgeDriver.DEFAULT_POLL_INTERVAL, driver!!.pollInterval)
     }
 
     @Test
-    fun `connect honors custom defaultTimeoutMs and pollIntervalMs`() {
+    fun `connect honors custom defaultTimeout and pollInterval`() = runBlocking {
         pageServer = FakeA11yPageServer()
-        driver = WebBridgeDriver.connect(pageServer!!.url, defaultTimeoutMs = 777L, pollIntervalMs = 33L)
+        driver = WebBridgeDriver.connect(
+            pageServer!!.url,
+            defaultTimeout = 777.milliseconds,
+            pollInterval = 33.milliseconds,
+        )
 
-        assertEquals(777L, driver!!.defaultTimeoutMs)
-        assertEquals(33L, driver!!.pollIntervalMs)
+        assertEquals(777.milliseconds, driver!!.defaultTimeout)
+        assertEquals(33.milliseconds, driver!!.pollInterval)
     }
 }

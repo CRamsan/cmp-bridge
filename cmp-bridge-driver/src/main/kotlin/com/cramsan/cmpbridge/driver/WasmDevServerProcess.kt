@@ -1,8 +1,18 @@
 package com.cramsan.cmpbridge.driver
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.io.IOException
 import java.net.Socket
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Owns an arbitrary dev-server subprocess — nothing more. cmp-bridge-driver has no opinion on how
@@ -34,8 +44,8 @@ class WasmDevServerProcess private constructor(
 
     companion object {
         private const val DEV_SERVER_HOST = "127.0.0.1"
-        private const val DEV_SERVER_TIMEOUT_MS = 180_000L
-        private const val POLL_INTERVAL_MS = 500L
+        private val DEV_SERVER_TIMEOUT: Duration = 180.seconds
+        private val POLL_INTERVAL: Duration = 500.milliseconds
         private const val DESTROY_TIMEOUT_SECONDS = 5L
         private const val DEFAULT_PORT = 8080
 
@@ -48,9 +58,10 @@ class WasmDevServerProcess private constructor(
          * this command from a Gradle-supplied repo root.
          */
         // Deliberate catch-all: any readiness failure gets wrapped with the dev server's own log
-        // path attached below, rather than surfacing a bare exception with nowhere to look.
+        // path attached below, rather than surfacing a bare exception with nowhere to look. Real
+        // coroutine cancellation is rethrown unwrapped, not swallowed by this — see below.
         @Suppress("TooGenericExceptionCaught")
-        fun launch(command: List<String>, workingDir: File, port: Int = DEFAULT_PORT): WasmDevServerProcess {
+        suspend fun launch(command: List<String>, workingDir: File, port: Int = DEFAULT_PORT): WasmDevServerProcess {
             val logFile = File.createTempFile("cmp-bridge-web-e2e", ".log").apply { deleteOnExit() }
             val process =
                 ProcessBuilder(command)
@@ -61,6 +72,9 @@ class WasmDevServerProcess private constructor(
 
             try {
                 waitUntilReady(process, port, logFile)
+            } catch (e: CancellationException) {
+                process.destroyForcibly()
+                throw e
             } catch (e: Exception) {
                 process.destroyForcibly()
                 throw IllegalStateException("${e.message}\nDev server log: ${logFile.absolutePath}", e)
@@ -68,20 +82,26 @@ class WasmDevServerProcess private constructor(
             return WasmDevServerProcess(process, logFile, port)
         }
 
-        private fun waitUntilReady(process: Process, port: Int, log: File) {
-            val deadline = System.currentTimeMillis() + DEV_SERVER_TIMEOUT_MS
-            while (System.currentTimeMillis() < deadline) {
-                if (!process.isAlive) {
-                    error("Dev server process exited before it became ready (exit code ${process.exitValue()})")
+        private suspend fun waitUntilReady(process: Process, port: Int, log: File) {
+            try {
+                withTimeout(DEV_SERVER_TIMEOUT) {
+                    while (true) {
+                        if (!process.isAlive) {
+                            error("Dev server process exited before it became ready (exit code ${process.exitValue()})")
+                        }
+                        // IOException only — a blanket Exception catch around a suspending call
+                        // would also swallow this withTimeout's own TimeoutCancellationException.
+                        try {
+                            withContext(Dispatchers.IO) { Socket(DEV_SERVER_HOST, port).close() }
+                            return@withTimeout
+                        } catch (_: IOException) {
+                            delay(POLL_INTERVAL)
+                        }
+                    }
                 }
-                try {
-                    Socket(DEV_SERVER_HOST, port).close()
-                    return
-                } catch (_: Exception) {
-                    Thread.sleep(POLL_INTERVAL_MS)
-                }
+            } catch (_: TimeoutCancellationException) {
+                error("Dev server did not become ready within $DEV_SERVER_TIMEOUT\nLog: ${log.absolutePath}")
             }
-            error("Dev server did not become ready within ${DEV_SERVER_TIMEOUT_MS}ms\nLog: ${log.absolutePath}")
         }
     }
 }

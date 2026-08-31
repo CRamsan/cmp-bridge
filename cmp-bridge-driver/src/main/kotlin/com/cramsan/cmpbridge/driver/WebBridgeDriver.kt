@@ -6,6 +6,8 @@ import com.microsoft.playwright.BrowserType
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.PlaywrightException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Path
@@ -13,6 +15,9 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.DurationUnit
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -66,8 +71,8 @@ class WebBridgeDriver private constructor(
     private val playwright: Playwright,
     private val browser: Browser,
     private val page: Page,
-    override val defaultTimeoutMs: Long,
-    override val pollIntervalMs: Long,
+    override val defaultTimeout: Duration,
+    override val pollInterval: Duration,
 ) : BridgeDriver {
     /** Runs [block], rethrowing any [PlaywrightException] (a dead page/browser) as [BridgeConnectionException]. */
     private inline fun <T> playwrightCall(block: () -> T): T = try {
@@ -120,10 +125,10 @@ class WebBridgeDriver private constructor(
 
     companion object {
         // connect()'s own accessibility-root-ready probe timeout — unrelated to BridgeDriver's
-        // own waitForTagVisibility/waitForText polling (defaultTimeoutMs/pollIntervalMs below).
-        private const val BRIDGE_TIMEOUT_MS = 30_000L
-        private const val CHROMIUM_INSTALL_TIMEOUT_MS = 600_000L
-        private const val OUTPUT_DRAIN_TIMEOUT_MS = 2_000L
+        // own waitForTagVisibility/waitForText polling (defaultTimeout/pollInterval below).
+        private val BRIDGE_TIMEOUT: Duration = 30.seconds
+        private val CHROMIUM_INSTALL_TIMEOUT: Duration = 600.seconds
+        private val OUTPUT_DRAIN_TIMEOUT: Duration = 2.seconds
 
         // Tracks a single install across every target/thread in the process — see
         // ensureChromiumInstalled(). installFuture is only ever written inside installLock.
@@ -137,36 +142,39 @@ class WebBridgeDriver private constructor(
             }
 
         /**
-         * Attaches to a wasmJs app that's already running at [url]. [defaultTimeoutMs]/
-         * [pollIntervalMs] become this driver's [BridgeDriver.defaultTimeoutMs]/
-         * [BridgeDriver.pollIntervalMs] — override for a slower app/CI environment.
+         * Attaches to a wasmJs app that's already running at [url]. [defaultTimeout]/
+         * [pollInterval] become this driver's [BridgeDriver.defaultTimeout]/
+         * [BridgeDriver.pollInterval] — override for a slower app/CI environment. The connect
+         * itself runs on [Dispatchers.IO], since Playwright's Java API is fully synchronous/blocking.
          */
-        fun connect(
+        suspend fun connect(
             url: String,
-            defaultTimeoutMs: Long = BridgeDriver.DEFAULT_TIMEOUT_MS,
-            pollIntervalMs: Long = BridgeDriver.DEFAULT_POLL_INTERVAL_MS,
-        ): WebBridgeDriver = try {
-            ensureChromiumInstalled()
-            // Playwright.create() would otherwise install its whole default browser set
-            // (Chromium, Firefox, WebKit) on first use — this driver only ever launches Chromium.
-            val createOptions =
-                Playwright.CreateOptions().setEnv(mapOf("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" to "1"))
-            val playwright = Playwright.create(createOptions)
-            val launchOptions = BrowserType.LaunchOptions().setHeadless(true)
-            resolveCachedChromiumExecutable()?.let { launchOptions.setExecutablePath(it) }
-            val browser = playwright.chromium().launch(launchOptions)
-            val page = browser.newPage()
-            page.navigate(url)
-            // The accessibility root exists once ComposeViewport starts, but only gets children
-            // after the first semantics sync — wait for that before treating the app as ready.
-            page.waitForFunction(
-                "() => document.body.shadowRoot?.getElementById('cmp_a11y_root')?.children.length > 0",
-                null,
-                Page.WaitForFunctionOptions().setTimeout(BRIDGE_TIMEOUT_MS.toDouble()),
-            )
-            WebBridgeDriver(playwright, browser, page, defaultTimeoutMs, pollIntervalMs)
-        } catch (e: PlaywrightException) {
-            throw BridgeConnectionException(e.message ?: "Could not connect to a web app at $url", e)
+            defaultTimeout: Duration = BridgeDriver.DEFAULT_TIMEOUT,
+            pollInterval: Duration = BridgeDriver.DEFAULT_POLL_INTERVAL,
+        ): WebBridgeDriver = withContext(Dispatchers.IO) {
+            try {
+                ensureChromiumInstalled()
+                // Playwright.create() would otherwise install its whole default browser set
+                // (Chromium, Firefox, WebKit) on first use — this driver only ever launches Chromium.
+                val createOptions =
+                    Playwright.CreateOptions().setEnv(mapOf("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" to "1"))
+                val playwright = Playwright.create(createOptions)
+                val launchOptions = BrowserType.LaunchOptions().setHeadless(true)
+                resolveCachedChromiumExecutable()?.let { launchOptions.setExecutablePath(it) }
+                val browser = playwright.chromium().launch(launchOptions)
+                val page = browser.newPage()
+                page.navigate(url)
+                // The accessibility root exists once ComposeViewport starts, but only gets children
+                // after the first semantics sync — wait for that before treating the app as ready.
+                page.waitForFunction(
+                    "() => document.body.shadowRoot?.getElementById('cmp_a11y_root')?.children.length > 0",
+                    null,
+                    Page.WaitForFunctionOptions().setTimeout(BRIDGE_TIMEOUT.toDouble(DurationUnit.MILLISECONDS)),
+                )
+                WebBridgeDriver(playwright, browser, page, defaultTimeout, pollInterval)
+            } catch (e: PlaywrightException) {
+                throw BridgeConnectionException(e.message ?: "Could not connect to a web app at $url", e)
+            }
         }
 
         /**
@@ -244,7 +252,7 @@ class WebBridgeDriver private constructor(
                     start()
                 }
 
-            val finished = process.waitFor(CHROMIUM_INSTALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            val finished = process.waitFor(CHROMIUM_INSTALL_TIMEOUT.inWholeMilliseconds, TimeUnit.MILLISECONDS)
             if (!finished) {
                 // The CLI shells out to a bundled Node.js process to do the actual download;
                 // destroying just this JVM leaves that child running unsupervised in the
@@ -252,11 +260,11 @@ class WebBridgeDriver private constructor(
                 process.toHandle().descendants().forEach { it.destroyForcibly() }
                 process.destroyForcibly()
             }
-            outputThread.join(OUTPUT_DRAIN_TIMEOUT_MS)
+            outputThread.join(OUTPUT_DRAIN_TIMEOUT.inWholeMilliseconds)
 
             if (finished && process.exitValue() == 0) return
             throw BridgeConnectionException(
-                "Failed to install Chromium for Playwright within ${CHROMIUM_INSTALL_TIMEOUT_MS}ms",
+                "Failed to install Chromium for Playwright within $CHROMIUM_INSTALL_TIMEOUT",
             )
         }
 

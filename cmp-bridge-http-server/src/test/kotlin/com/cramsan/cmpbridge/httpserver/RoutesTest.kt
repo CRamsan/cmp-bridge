@@ -19,8 +19,10 @@ import io.ktor.server.testing.testApplication
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
-private const val TEST_SESSION_LIMIT_MS = 3_600_000L
+private val TEST_SESSION_LIMIT: Duration = 3_600_000.milliseconds
 
 /** A failure type the StatusPages block has no dedicated handler for, to exercise its 500 fallback. */
 private class UnmappedDriverFailure(message: String) : Exception(message)
@@ -82,8 +84,8 @@ private val SILENT_NODE =
     )
 
 private class FakeBridgeDriver : BridgeDriver {
-    override var defaultTimeoutMs: Long = BridgeDriver.DEFAULT_TIMEOUT_MS
-    override var pollIntervalMs: Long = BridgeDriver.DEFAULT_POLL_INTERVAL_MS
+    override var defaultTimeout: Duration = BridgeDriver.DEFAULT_TIMEOUT
+    override var pollInterval: Duration = BridgeDriver.DEFAULT_POLL_INTERVAL
     var lastClickTag: String? = null
     var lastSetText: Pair<String, String>? = null
     var lastScroll: Pair<String, Int>? = null
@@ -117,15 +119,15 @@ private class FakeBridgeDriver : BridgeDriver {
 
 /** A registry whose [connect] always returns [driver], regardless of the request's target. */
 private fun testRegistry(driver: BridgeDriver) = BridgeSessionRegistry(
-    maxIdleMs = TEST_SESSION_LIMIT_MS,
-    maxSessionMs = TEST_SESSION_LIMIT_MS,
+    maxIdle = TEST_SESSION_LIMIT,
+    maxSession = TEST_SESSION_LIMIT,
     connect = { driver },
 )
 
 /** A registry using the real default connect logic, to exercise its own target validation. */
 private fun defaultConnectRegistry() = BridgeSessionRegistry(
-    maxIdleMs = TEST_SESSION_LIMIT_MS,
-    maxSessionMs = TEST_SESSION_LIMIT_MS,
+    maxIdle = TEST_SESSION_LIMIT,
+    maxSession = TEST_SESSION_LIMIT,
 )
 
 class RoutesTest {
@@ -368,8 +370,8 @@ class RoutesTest {
     @Test
     fun `POST bridge with waitForTagVisibility omitting timeoutMs uses the driver's own default`() = testApplication {
         val driver = FakeBridgeDriver().apply {
-            defaultTimeoutMs = 200
-            pollIntervalMs = 10
+            defaultTimeout = 200.milliseconds
+            pollInterval = 10.milliseconds
         }
         application { bridgeHttpModule(testRegistry(driver)) }
         val client = createClient { install(ContentNegotiation) { json() } }
@@ -430,8 +432,8 @@ class RoutesTest {
     fun `POST bridge with waitForText omitting timeoutMs uses the driver's own default`() = testApplication {
         val driver = FakeBridgeDriver().apply {
             tree = SILENT_NODE
-            defaultTimeoutMs = 200
-            pollIntervalMs = 10
+            defaultTimeout = 200.milliseconds
+            pollInterval = 10.milliseconds
         }
         application { bridgeHttpModule(testRegistry(driver)) }
         val client = createClient { install(ContentNegotiation) { json() } }
@@ -565,8 +567,8 @@ class RoutesTest {
     fun `POST bridge resolves the same target only once across repeated requests`() = testApplication {
         var connectCount = 0
         val registry = BridgeSessionRegistry(
-            maxIdleMs = TEST_SESSION_LIMIT_MS,
-            maxSessionMs = TEST_SESSION_LIMIT_MS,
+            maxIdle = TEST_SESSION_LIMIT,
+            maxSession = TEST_SESSION_LIMIT,
             connect = {
                 connectCount++
                 FakeBridgeDriver()
@@ -591,8 +593,8 @@ class RoutesTest {
     fun `POST bridge with disconnect closes the session so the next request reconnects`() = testApplication {
         var connectCount = 0
         val registry = BridgeSessionRegistry(
-            maxIdleMs = TEST_SESSION_LIMIT_MS,
-            maxSessionMs = TEST_SESSION_LIMIT_MS,
+            maxIdle = TEST_SESSION_LIMIT,
+            maxSession = TEST_SESSION_LIMIT,
             connect = {
                 connectCount++
                 FakeBridgeDriver()

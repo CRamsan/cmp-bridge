@@ -2,25 +2,35 @@ package com.cramsan.cmpbridge.driver
 
 import com.cramsan.cmpbridge.HierarchyNode
 import com.cramsan.cmpbridge.find
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Drives a live, already-running app through its UI interaction bridge. Implementations connect
- * via a platform-specific `connect(...)` and are torn down via [close].
+ * via a platform-specific `connect(...)` and are torn down via [close]. The five core operations
+ * ([getHierarchy], [click], [setText], [scroll], [screenshot]) are plain blocking calls, same as
+ * ever — only [waitForTagVisibility]/[waitForText] are `suspend`, and call [getBounds]/
+ * [getHierarchy] directly (blocking) inside their poll loop rather than dispatching them
+ * elsewhere, consistent with every other caller of those two methods.
  */
 interface BridgeDriver : AutoCloseable {
     /**
-     * Default [waitForTagVisibility]/[waitForText] timeout (ms) when a call doesn't pass its own
-     * `timeoutMs`. [BridgeDriver.DEFAULT_TIMEOUT_MS] unless the implementation was connected with
-     * an override — increase this for slow CI environments or network-backed navigation.
+     * Default [waitForTagVisibility]/[waitForText] timeout when a call doesn't pass its own
+     * `timeout`. [BridgeDriver.DEFAULT_TIMEOUT] unless the implementation was connected with an
+     * override — increase this for slow CI environments or network-backed navigation.
      */
-    val defaultTimeoutMs: Long get() = DEFAULT_TIMEOUT_MS
+    val defaultTimeout: Duration get() = DEFAULT_TIMEOUT
 
     /**
-     * Interval (ms) between hierarchy re-fetches in [waitForTagVisibility]/[waitForText].
-     * [BridgeDriver.DEFAULT_POLL_INTERVAL_MS] unless the implementation was connected with an
+     * Interval between hierarchy re-fetches in [waitForTagVisibility]/[waitForText].
+     * [BridgeDriver.DEFAULT_POLL_INTERVAL] unless the implementation was connected with an
      * override.
      */
-    val pollIntervalMs: Long get() = DEFAULT_POLL_INTERVAL_MS
+    val pollInterval: Duration get() = DEFAULT_POLL_INTERVAL
 
     /** Returns the app's current semantics tree, root first. */
     fun getHierarchy(): HierarchyNode
@@ -48,52 +58,86 @@ interface BridgeDriver : AutoCloseable {
     }
 
     /**
-     * Blocks until [tag]'s existence matches [visibility], up to [timeoutMs] (defaults to
-     * [defaultTimeoutMs], `15_000`ms unless overridden at connect time), by repeatedly
-     * re-fetching the hierarchy — [TagVisibility.VISIBLE] for "a new tag appeared" (e.g. after a
-     * navigation), [TagVisibility.GONE] for "same screen, state changed" cases like a success
-     * banner or dialog closing (the same class of race [waitForText] closes for a text change).
-     * Returns the node when [visibility] is `VISIBLE`, `null` when it's `GONE`. Polls every
-     * [pollIntervalMs] (`200`ms unless overridden).
+     * Suspends until [tag]'s existence matches [visibility], up to [timeout] (defaults to
+     * [defaultTimeout], `15s` unless overridden at connect time), by repeatedly re-fetching the
+     * hierarchy — [TagVisibility.VISIBLE] for "a new tag appeared" (e.g. after a navigation),
+     * [TagVisibility.GONE] for "same screen, state changed" cases like a success banner or dialog
+     * closing (the same class of race [waitForText] closes for a text change). Returns the node
+     * when [visibility] is `VISIBLE`, `null` when it's `GONE`. Polls every [pollInterval] (`200ms`
+     * unless overridden).
+     *
+     * Uses [withTimeout] (not `withTimeoutOrNull`) and catches only [TimeoutCancellationException]
+     * deliberately: `withTimeoutOrNull`'s null-on-timeout return would be indistinguishable from
+     * `GONE`'s own legitimate null result. This narrow catch won't swallow an unrelated outer
+     * cancellation — but if a future caller ever wraps this call in its *own* [withTimeout], that
+     * outer timeout's exception would also be caught here and mis-reported as this function's own
+     * [BridgeTimeoutException]. No caller does that today.
      */
-    fun waitForTagVisibility(
+    suspend fun waitForTagVisibility(
         tag: String,
         visibility: TagVisibility,
-        timeoutMs: Long = defaultTimeoutMs,
+        timeout: Duration = defaultTimeout,
     ): HierarchyNode? {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            val node = getBounds(tag)
-            when (visibility) {
-                TagVisibility.VISIBLE -> if (node != null) return node
-                TagVisibility.GONE -> if (node == null) return null
+        var result: HierarchyNode? = null
+        try {
+            withTimeout(timeout) {
+                while (true) {
+                    val node = getBounds(tag)
+                    when (visibility) {
+                        TagVisibility.VISIBLE -> if (node != null) {
+                            result = node
+                            return@withTimeout
+                        }
+
+                        TagVisibility.GONE -> if (node == null) return@withTimeout
+                    }
+                    delay(pollInterval)
+                }
             }
-            Thread.sleep(pollIntervalMs)
+        } catch (_: TimeoutCancellationException) {
+            throw BridgeTimeoutException("Tag \"$tag\" never reached visibility $visibility within $timeout")
         }
-        throw BridgeTimeoutException("Tag \"$tag\" never reached visibility $visibility within ${timeoutMs}ms")
+        return result
     }
 
     /**
-     * Blocks until [tag]'s settled (non-null) text satisfies [comparator], up to [timeoutMs]
-     * (defaults to [defaultTimeoutMs], `15_000`ms unless overridden at connect time). A node can
-     * report `null`/stale text on the very first read after it appears or a screen transition —
+     * Suspends until [tag]'s settled (non-null) text satisfies [comparator], up to [timeout]
+     * (defaults to [defaultTimeout], `15s` unless overridden at connect time). A node can report
+     * `null`/stale text on the very first read after it appears or a screen transition —
      * desktop's semantics tree and web's (debounced 100–1000ms) accessibility-DOM sync both need
      * a moment to catch up — so callers reading freshly-appeared or freshly-changed text should
      * go through this rather than a raw [getHierarchy] lookup. Also covers "same screen, state
      * changed" assertions where no new tag appears — inline validation errors, toggled badges, a
      * counter's new value — that a click's own async (e.g. coroutine-dispatched) state update may
-     * not have applied yet by the time it returns. Polls every [pollIntervalMs] (`200`ms unless
+     * not have applied yet by the time it returns. Polls every [pollInterval] (`200ms` unless
      * overridden).
+     *
+     * See [waitForTagVisibility]'s own doc for why this catches only [TimeoutCancellationException].
      */
-    fun waitForText(tag: String, comparator: TextComparator, timeoutMs: Long = defaultTimeoutMs): HierarchyNode {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            val node = getBounds(tag)
-            val text = node?.text
-            if (node != null && text != null && comparator.matches(text)) return node
-            Thread.sleep(pollIntervalMs)
+    suspend fun waitForText(
+        tag: String,
+        comparator: TextComparator,
+        timeout: Duration = defaultTimeout,
+    ): HierarchyNode {
+        var result: HierarchyNode? = null
+        try {
+            withTimeout(timeout) {
+                while (true) {
+                    val node = getBounds(tag)
+                    val text = node?.text
+                    if (node != null && text != null && comparator.matches(text)) {
+                        result = node
+                        return@withTimeout
+                    }
+                    delay(pollInterval)
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            throw BridgeTimeoutException("Tag \"$tag\" never satisfied $comparator within $timeout")
         }
-        throw BridgeTimeoutException("Tag \"$tag\" never satisfied $comparator within ${timeoutMs}ms")
+        // Non-null: withTimeout only returns normally (no exception) via the return@withTimeout
+        // above, which always sets `result` first.
+        return checkNotNull(result)
     }
 
     /** Clicks the node tagged [tag] via a real synthetic input event. */
@@ -113,10 +157,10 @@ interface BridgeDriver : AutoCloseable {
     fun screenshot(): ByteArray
 
     companion object {
-        /** Default [defaultTimeoutMs] for an implementation that doesn't override it. */
-        const val DEFAULT_TIMEOUT_MS = 15_000L
+        /** Default [defaultTimeout] for an implementation that doesn't override it. */
+        val DEFAULT_TIMEOUT: Duration = 15.seconds
 
-        /** Default [pollIntervalMs] for an implementation that doesn't override it. */
-        const val DEFAULT_POLL_INTERVAL_MS = 200L
+        /** Default [pollInterval] for an implementation that doesn't override it. */
+        val DEFAULT_POLL_INTERVAL: Duration = 200.milliseconds
     }
 }

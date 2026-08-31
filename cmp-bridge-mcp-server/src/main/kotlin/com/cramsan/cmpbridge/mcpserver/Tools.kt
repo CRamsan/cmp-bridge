@@ -27,6 +27,7 @@ import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import java.util.Base64
+import kotlin.time.Duration.Companion.milliseconds
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -155,10 +156,10 @@ private fun Server.registerWaitForTagVisibilityTool(registry: BridgeSessionRegis
             val driver = registry.resolve(request.arguments.toBridgeTarget())
             val tag = request.arguments.stringArg("tag")
             val visibility = TagVisibility.valueOf(request.arguments.stringArg("visibility"))
-            val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
+            val timeout = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long?.milliseconds
             val node =
-                if (timeoutMs != null) {
-                    driver.waitForTagVisibility(tag, visibility, timeoutMs)
+                if (timeout != null) {
+                    driver.waitForTagVisibility(tag, visibility, timeout)
                 } else {
                     driver.waitForTagVisibility(tag, visibility)
                 }
@@ -186,10 +187,10 @@ private fun Server.registerWaitForTextTool(registry: BridgeSessionRegistry) {
             val comparator = json.decodeFromJsonElement<TextComparator>(
                 request.arguments?.get("comparator") ?: error("Missing \"comparator\" argument"),
             )
-            val timeoutMs = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long
+            val timeout = request.arguments?.get("timeoutMs")?.jsonPrimitive?.long?.milliseconds
             val node =
-                if (timeoutMs != null) {
-                    driver.waitForText(tag, comparator, timeoutMs)
+                if (timeout != null) {
+                    driver.waitForText(tag, comparator, timeout)
                 } else {
                     driver.waitForText(tag, comparator)
                 }

@@ -105,7 +105,7 @@ Beyond what detekt enforces, match the conventions already visible in the codeba
   problem rather than a deliberate design choice.
 - **Constants are named, not magic.** Timeouts, ports, poll intervals, and byte offsets
   all live in companion-object `const val`s with names that explain the number (see
-  `DesktopBridgeServer.RELEASE_OFFSET_MS`, `BridgeDriver.DEFAULT_POLL_INTERVAL_MS`).
+  `DesktopBridgeServer.RELEASE_OFFSET_MS`, `BridgeDriver.DEFAULT_POLL_INTERVAL`).
 - **Platform gaps are documented where they're hit, not hidden.** Where web's
   accessibility-DOM path can't do something desktop's semantics tree can (e.g. the
   known scroll and password-masking gaps referenced in `WebBridgeDriver`), the

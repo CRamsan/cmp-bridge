@@ -133,13 +133,20 @@ Button(onClick = { ... }, modifier = Modifier.testTag("submit_button")) { ... }
 **3. Drive it from a test**, via `cmp-bridge-driver`:
 
 ```kotlin
-val process = DesktopAppProcess.launch("com.example.myapp.desktop.MainKt")
-val driver = DesktopBridgeDriver.connect(process.host, process.port)
-ManagedBridgeDriver(process, driver).use { d ->
-    d.click("submit_button")
-    d.waitForText("status_text", TextComparator.Equals("Done"))
+runBlocking {
+    val process = DesktopAppProcess.launch("com.example.myapp.desktop.MainKt")
+    val driver = DesktopBridgeDriver.connect(process.host, process.port)
+    ManagedBridgeDriver(process, driver).use { d ->
+        d.click("submit_button")
+        d.waitForText("status_text", TextComparator.Equals("Done"))
+    }
 }
 ```
+
+`connect`/`launch` and the `waitForTagVisibility`/`waitForText` convenience helpers are all
+`suspend fun`s (they poll via `kotlinx.coroutines.delay`, not `Thread.sleep`) — call them
+from a coroutine, e.g. `runBlocking { }` in plain test/CLI code as above, or directly if
+you're already in one.
 
 `WasmDevServerProcess` + `WebBridgeDriver.connect(url)` is the equivalent pair for a
 wasmJs app. `WasmDevServerProcess.launch` takes a plain `command`/`workingDir` — it has
@@ -147,16 +154,16 @@ no built-in notion of Gradle or a repo root, so it's on the caller to build that
 (`cmp-bridge-sample`'s `DemoScenarioTest` is a complete, working example of both, including
 that part).
 
-**Timeouts**: `waitForTagVisibility`/`waitForText` default to a `timeoutMs` of `15_000`
-(`BridgeDriver.DEFAULT_TIMEOUT_MS`), polling every `200`ms (`BridgeDriver.DEFAULT_POLL_INTERVAL_MS`)
-in between. Both are per-call overridable (`d.waitForText(tag, comparator, timeoutMs = 30_000)`)
-and also settable once for the whole driver instance, via `connect(...)`'s own
-`defaultTimeoutMs`/`pollIntervalMs` parameters — useful for a slow CI environment or an app
-whose navigations are consistently network-backed, so you don't have to repeat `timeoutMs =`
-on every call:
+**Timeouts**: `waitForTagVisibility`/`waitForText` default to a `timeout` of `15.seconds`
+(`BridgeDriver.DEFAULT_TIMEOUT`, a `kotlin.time.Duration`), polling every `200.milliseconds`
+(`BridgeDriver.DEFAULT_POLL_INTERVAL`) in between. Both are per-call overridable
+(`d.waitForText(tag, comparator, timeout = 30.seconds)`) and also settable once for the
+whole driver instance, via `connect(...)`'s own `defaultTimeout`/`pollInterval` parameters
+— useful for a slow CI environment or an app whose navigations are consistently
+network-backed, so you don't have to repeat `timeout =` on every call:
 
 ```kotlin
-val driver = DesktopBridgeDriver.connect(process.host, process.port, defaultTimeoutMs = 30_000)
+val driver = DesktopBridgeDriver.connect(process.host, process.port, defaultTimeout = 30.seconds)
 ```
 
 ## Trying it out with the sample app
@@ -221,10 +228,12 @@ automatically once it's been idle for `--max-idle-ms` (default 5 minutes) or ali
 one that's already running.
 
 Every driver connected this way also picks up the server's configured
-`--default-timeout-ms` (default `15000`, matching `BridgeDriver.DEFAULT_TIMEOUT_MS`) and
+`--default-timeout-ms` (default `15000`, matching `BridgeDriver.DEFAULT_TIMEOUT`) and
 `--poll-interval-ms` (default `200`) for `waitForTagVisibility`/`waitForText` calls that
 don't pass their own `timeoutMs` — process-wide flags, not per-target, since they're set
-once at server launch rather than per request/tool call.
+once at server launch rather than per request/tool call. Both flags still take a plain
+millisecond integer (converted to a `kotlin.time.Duration` internally) — no CLI syntax
+change from the underlying `Long` → `Duration` migration.
 
 **HTTP (`cmp-bridge-http-server`)**
 

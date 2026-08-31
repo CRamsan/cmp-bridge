@@ -32,6 +32,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlin.time.Duration.Companion.milliseconds
 
 @Serializable
 private data class ErrorResponse(val error: String)
@@ -61,8 +62,10 @@ private data class SetTextPayload(val tag: String, val text: String)
 private data class ScrollPayload(val anchorTag: String, val deltaY: Int)
 
 /**
- * [timeoutMs] left `null` defers to the resolved driver's own [BridgeDriver.defaultTimeoutMs]
- * (see [BridgeDriver.waitForTagVisibility]); [visibility] is required.
+ * [timeoutMs] is the wire format (plain milliseconds, not [kotlin.time.Duration] — kotlinx.serialization
+ * has no built-in `Duration` serializer, so this stays a `Long` and is converted at the call site
+ * below). Left `null`, it defers to the resolved driver's own [BridgeDriver.defaultTimeout] (see
+ * [BridgeDriver.waitForTagVisibility]); [visibility] is required.
  */
 @Serializable
 private data class WaitForTagVisibilityPayload(
@@ -72,8 +75,9 @@ private data class WaitForTagVisibilityPayload(
 )
 
 /**
- * [timeoutMs] left `null` defers to the resolved driver's own [BridgeDriver.defaultTimeoutMs]
- * (see [BridgeDriver.waitForText]); [comparator] is required.
+ * [timeoutMs] is the wire format (plain milliseconds — see [WaitForTagVisibilityPayload]'s own doc).
+ * Left `null`, it defers to the resolved driver's own [BridgeDriver.defaultTimeout] (see
+ * [BridgeDriver.waitForText]); [comparator] is required.
  */
 @Serializable
 private data class WaitForTextPayload(val tag: String, val comparator: TextComparator, val timeoutMs: Long? = null)
@@ -154,10 +158,10 @@ private suspend fun handleBridgeRequest(call: ApplicationCall, registry: BridgeS
 
             "waitForTagVisibility" -> {
                 val payload = payloadJson.decodeFromJsonElement<WaitForTagVisibilityPayload>(request.payload)
-                val timeoutMs = payload.timeoutMs
+                val timeout = payload.timeoutMs?.milliseconds
                 val node =
-                    if (timeoutMs != null) {
-                        driver.waitForTagVisibility(payload.tag, payload.visibility, timeoutMs)
+                    if (timeout != null) {
+                        driver.waitForTagVisibility(payload.tag, payload.visibility, timeout)
                     } else {
                         driver.waitForTagVisibility(payload.tag, payload.visibility)
                     }
@@ -166,10 +170,10 @@ private suspend fun handleBridgeRequest(call: ApplicationCall, registry: BridgeS
 
             "waitForText" -> {
                 val payload = payloadJson.decodeFromJsonElement<WaitForTextPayload>(request.payload)
-                val timeoutMs = payload.timeoutMs
+                val timeout = payload.timeoutMs?.milliseconds
                 val node =
-                    if (timeoutMs != null) {
-                        driver.waitForText(payload.tag, payload.comparator, timeoutMs)
+                    if (timeout != null) {
+                        driver.waitForText(payload.tag, payload.comparator, timeout)
                     } else {
                         driver.waitForText(payload.tag, payload.comparator)
                     }

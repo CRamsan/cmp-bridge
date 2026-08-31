@@ -6,16 +6,20 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.parameters.groups.OptionGroup
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
+import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 
 private const val DEFAULT_SERVER_PORT = 8090
-private const val DEFAULT_MAX_IDLE_MS = 300_000L
-private const val DEFAULT_MAX_SESSION_MS = 1_800_000L
+private val DEFAULT_MAX_IDLE: Duration = 5.minutes
+private val DEFAULT_MAX_SESSION: Duration = 30.minutes
 
 /**
  * Serves a local HTTP REST API that can attach to any number of already-running apps' UI
@@ -30,10 +34,10 @@ private class BridgeHttpServerCommand : CliktCommand(name = "cmp-bridge-http-ser
 
     override fun run() {
         val registry = BridgeSessionRegistry(
-            options.maxIdleMs,
-            options.maxSessionMs,
-            options.defaultTimeoutMs,
-            options.pollIntervalMs,
+            options.maxIdle,
+            options.maxSession,
+            options.defaultTimeout,
+            options.pollInterval,
         )
         val server = embeddedServer(Netty, port = serverPort) { bridgeHttpModule(registry) }
         Runtime.getRuntime().addShutdownHook(Thread { registry.close() })
@@ -46,22 +50,25 @@ private class BridgeHttpServerCommand : CliktCommand(name = "cmp-bridge-http-ser
  * rather than shared through a third module.
  */
 internal class SessionOptions : OptionGroup(name = "Session limits") {
-    val maxIdleMs: Long by option(
+    // CLI values are still plain millisecond integers (no existing Clikt Duration type or
+    // convert{} precedent to build a new flag syntax on) — .convert{} maps them to Duration
+    // immediately so the rest of the app never touches a raw millis Long.
+    val maxIdle: Duration by option(
         "--max-idle-ms",
         help = "Close a target's session after this long unused",
-    ).long().default(DEFAULT_MAX_IDLE_MS)
-    val maxSessionMs: Long by option(
+    ).long().convert { it.milliseconds }.default(DEFAULT_MAX_IDLE)
+    val maxSession: Duration by option(
         "--max-session-ms",
         help = "Close a target's session after this long since it was first opened, regardless of use",
-    ).long().default(DEFAULT_MAX_SESSION_MS)
-    val defaultTimeoutMs: Long by option(
+    ).long().convert { it.milliseconds }.default(DEFAULT_MAX_SESSION)
+    val defaultTimeout: Duration by option(
         "--default-timeout-ms",
         help = "Default waitForTagVisibility/waitForText timeout for a call that doesn't pass its own timeoutMs",
-    ).long().default(BridgeDriver.DEFAULT_TIMEOUT_MS)
-    val pollIntervalMs: Long by option(
+    ).long().convert { it.milliseconds }.default(BridgeDriver.DEFAULT_TIMEOUT)
+    val pollInterval: Duration by option(
         "--poll-interval-ms",
         help = "Interval between hierarchy polls in waitForTagVisibility/waitForText",
-    ).long().default(BridgeDriver.DEFAULT_POLL_INTERVAL_MS)
+    ).long().convert { it.milliseconds }.default(BridgeDriver.DEFAULT_POLL_INTERVAL)
 }
 
 /** Entry point for the UI test bridge HTTP server. */

@@ -1,9 +1,18 @@
 package com.cramsan.cmpbridge.driver
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.io.IOException
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Launches a desktop app subprocess with the UI bridge armed, using an isolated `user.home` so it
@@ -25,15 +34,15 @@ class DesktopAppProcess private constructor(
     }
 
     companion object {
-        private const val READY_TIMEOUT_MS = 30_000L
-        private const val READY_POLL_INTERVAL_MS = 250L
+        private val READY_TIMEOUT: Duration = 30.seconds
+        private val READY_POLL_INTERVAL: Duration = 250.milliseconds
         private const val DESTROY_TIMEOUT_SECONDS = 5L
 
         /**
          * [mainClass] is the app's own desktop launcher entry point, e.g.
          * `"com.example.myapp.desktop.MainKt"`.
          */
-        fun launch(mainClass: String): DesktopAppProcess {
+        suspend fun launch(mainClass: String): DesktopAppProcess {
             val classpath =
                 System.getProperty("java.class.path")
                     ?: error("java.class.path not set — cannot locate the desktop app's runtime classpath")
@@ -69,20 +78,29 @@ class DesktopAppProcess private constructor(
             return DesktopAppProcess(process, logFile, "127.0.0.1", port)
         }
 
-        private fun waitUntilReady(port: Int, process: Process) {
-            val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
-            while (System.currentTimeMillis() < deadline) {
-                if (!process.isAlive) {
-                    error("App process exited before the bridge became ready (exit code ${process.exitValue()})")
+        private suspend fun waitUntilReady(port: Int, process: Process) {
+            try {
+                withTimeout(READY_TIMEOUT) {
+                    while (true) {
+                        if (!process.isAlive) {
+                            error(
+                                "App process exited before the bridge became ready " +
+                                    "(exit code ${process.exitValue()})",
+                            )
+                        }
+                        // IOException only — a blanket Exception catch around a suspending call
+                        // would also swallow this withTimeout's own TimeoutCancellationException.
+                        try {
+                            withContext(Dispatchers.IO) { Socket("127.0.0.1", port).close() }
+                            return@withTimeout
+                        } catch (_: IOException) {
+                            delay(READY_POLL_INTERVAL)
+                        }
+                    }
                 }
-                try {
-                    Socket("127.0.0.1", port).close()
-                    return
-                } catch (_: Exception) {
-                    Thread.sleep(READY_POLL_INTERVAL_MS)
-                }
+            } catch (_: TimeoutCancellationException) {
+                error("Bridge on port $port did not become ready within $READY_TIMEOUT")
             }
-            error("Bridge on port $port did not become ready within ${READY_TIMEOUT_MS}ms")
         }
     }
 }

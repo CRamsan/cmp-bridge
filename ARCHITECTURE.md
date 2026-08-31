@@ -125,17 +125,26 @@ and `WebBridgeDriver` are its only two
 implementations. Everything downstream — the HTTP server, the MCP server, an app's own
 test code — is written against this interface, not against either platform's transport.
 
+`waitForTagVisibility`/`waitForText` are `suspend fun`s (issue #20) — they poll via
+`kotlinx.coroutines.withTimeout`/`delay` rather than a hand-rolled `Thread.sleep` loop, and
+their timeout/poll-interval parameters (`timeout`, `defaultTimeout`, `pollInterval`,
+`BridgeDriver.DEFAULT_TIMEOUT`/`DEFAULT_POLL_INTERVAL`) are `kotlin.time.Duration`, not raw
+`Long` millis. The other five core operations stay plain blocking functions — only the
+polling wait helpers, and the `connect`/`launch` factories below (which have their own
+polling wait loops), are suspend.
+
 ### Connecting vs. launching
 
 `cmp-bridge-driver` separates *attaching to an already-running app* from *launching
 one*:
 
 - `DesktopBridgeDriver.connect` / `WebBridgeDriver.connect` only ever attach — `close()`
-  never touches a process.
+  never touches a process. Both are `suspend fun`s.
 - `DesktopAppProcess.launch(mainClass)` and `WasmDevServerProcess.launch(command,
-  workingDir)` own a subprocess (the app itself, or a wasmJs dev server) — both poll
-  until the port is connectable and tear it down on `close()`. `DesktopAppProcess` is
-  opinionated (runs `mainClass` via `java -cp`, with an isolated `user.home`);
+  workingDir)` — also `suspend fun`s — own a subprocess (the app itself, or a wasmJs dev
+  server) — both poll until the port is connectable and tear it down on `close()`.
+  `DesktopAppProcess` is opinionated (runs `mainClass` via `java -cp`, with an isolated
+  `user.home`);
   `WasmDevServerProcess` isn't — it has no notion of Gradle or a repo root, and just
   runs whatever `command` it's handed (issue #14 — the previous
   `launch(gradleModulePath)` needed an undocumented `e2e.repoRoot` system property just
@@ -166,23 +175,32 @@ rather than connecting a `BridgeDriver` directly:
 
 - **`BridgeTarget`** (`platform`, plus `host`/`port` for desktop or `url` for web) is
   the plain-data key identifying which app instance to attach to.
-- **`resolve(target)`** connects and caches a driver for `target` on first use
-  (`ConcurrentHashMap.computeIfAbsent`, so two concurrent first calls for the same
-  never-seen target can't race into two connects), and touches its last-used timestamp
-  on every subsequent call. `DesktopBridgeDriver.connect` is a cheap reachability poll;
+- **`resolve(target)`** (`suspend fun`, since connecting is now suspend too) connects
+  and caches a driver for `target` on first use, and touches its last-used timestamp on
+  every subsequent call. `DesktopBridgeDriver.connect` is a cheap reachability poll;
   `WebBridgeDriver.connect` launches a real headless Chromium via Playwright — caching
   is what keeps a web target's per-call cost down to the actual driver operation.
+  Internally the cache is `ConcurrentHashMap<BridgeTarget, CompletableDeferred<Session>>`,
+  not a plain `Session` map — `ConcurrentHashMap.computeIfAbsent`'s lambda can't call a
+  suspend `connect`, so a `putIfAbsent`-based retry loop is used instead: exactly one
+  racer wins the atomic insert and actually connects, every other concurrent first call
+  for the same never-seen target `await()`s the winner's `CompletableDeferred` rather
+  than connecting a second time. A `disconnect()`/`close()` racing a fresh in-flight
+  connect for the same target is an accepted edge case — it's left to finish on its own
+  rather than being closed.
 - A background sweep (a plain `ScheduledExecutorService`) evicts a session once it's
-  been idle past `maxIdleMs` or alive past `maxSessionMs`, whichever comes first;
+  been idle past `maxIdle` or alive past `maxSession`, whichever comes first;
   `disconnect(target)` ends one immediately instead of waiting on either limit. Both
-  limits are constructor params, exposed by each server as
-  `--max-idle-ms`/`--max-session-ms` (defaults: 5 minutes idle, 30 minutes total).
-- `driverDefaultTimeoutMs`/`driverPollIntervalMs` are two more constructor params
-  (defaults: `BridgeDriver.DEFAULT_TIMEOUT_MS`/`DEFAULT_POLL_INTERVAL_MS`, `15000`/`200`),
+  limits are `kotlin.time.Duration` constructor params, exposed by each server as
+  `--max-idle-ms`/`--max-session-ms` (still plain millisecond integers on the CLI,
+  converted to `Duration` via Clikt's `.convert {}` — defaults: 5 minutes idle, 30
+  minutes total).
+- `driverDefaultTimeout`/`driverPollInterval` (`Duration`) are two more constructor
+  params (defaults: `BridgeDriver.DEFAULT_TIMEOUT`/`DEFAULT_POLL_INTERVAL`, `15s`/`200ms`),
   exposed as `--default-timeout-ms`/`--poll-interval-ms`. They become every connected
-  driver's own `defaultTimeoutMs`/`pollIntervalMs`, so a call that omits `timeoutMs`
-  honors the server's configured value instead of always falling back to a hardcoded
-  `15000`. Deliberately scoped to the registry, not `BridgeTarget` — `BridgeTarget` is a
+  driver's own `defaultTimeout`/`pollInterval`, so a call that omits `timeoutMs` honors
+  the server's configured value instead of always falling back to a hardcoded `15s`.
+  Deliberately scoped to the registry, not `BridgeTarget` — `BridgeTarget` is a
   `data class` used as the session cache's key, so adding fields there would fragment the
   cache (two requests for the same app, differing only in timeout config, would open two
   redundant sessions).
