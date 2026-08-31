@@ -18,10 +18,7 @@ import kotlin.time.Duration.Companion.seconds
  * Owns an arbitrary dev-server subprocess — nothing more. cmp-bridge-driver has no opinion on how
  * a wasmJs dev server gets started (a Gradle task, an npm script, a Docker container, ...); the
  * caller supplies the exact [launch] command and working directory to run, the same as they'd
- * type at a terminal. (Issue #14: the previous Gradle-module-path-specific signature needed an
- * undocumented `e2e.repoRoot` system property just to locate `gradlew` — pushing command
- * construction to the caller, who already knows their own repo layout, removes the need for that
- * discovery entirely instead of just documenting or auto-deriving it.)
+ * type at a terminal, since only the caller knows its own repo layout.
  *
  * Pair with [WebBridgeDriver.connect] to actually drive the app it serves — directly, or through
  * [ManagedBridgeDriver] for single-call teardown.

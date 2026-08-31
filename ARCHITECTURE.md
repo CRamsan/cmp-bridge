@@ -125,7 +125,7 @@ and `WebBridgeDriver` are its only two
 implementations. Everything downstream — the HTTP server, the MCP server, an app's own
 test code — is written against this interface, not against either platform's transport.
 
-`waitForTagVisibility`/`waitForText` are `suspend fun`s (issue #20) — they poll via
+`waitForTagVisibility`/`waitForText` are `suspend fun`s — they poll via
 `kotlinx.coroutines.withTimeout`/`delay` rather than a hand-rolled `Thread.sleep` loop, and
 their timeout/poll-interval parameters (`timeout`, `defaultTimeout`, `pollInterval`,
 `BridgeDriver.DEFAULT_TIMEOUT`/`DEFAULT_POLL_INTERVAL`) are `kotlin.time.Duration`, not raw
@@ -144,11 +144,9 @@ one*:
   workingDir)` — also `suspend fun`s — own a subprocess (the app itself, or a wasmJs dev
   server) — both poll until the port is connectable and tear it down on `close()`.
   `DesktopAppProcess` is opinionated (runs `mainClass` via `java -cp`, with an isolated
-  `user.home`);
-  `WasmDevServerProcess` isn't — it has no notion of Gradle or a repo root, and just
-  runs whatever `command` it's handed (issue #14 — the previous
-  `launch(gradleModulePath)` needed an undocumented `e2e.repoRoot` system property just
-  to locate `gradlew` internally).
+  `user.home`); `WasmDevServerProcess` isn't — it has no notion of Gradle or a repo root,
+  and just runs whatever `command` it's handed, since only the caller knows its own repo
+  layout.
 - `ManagedBridgeDriver(resource, driver)` composes the two by delegation (`BridgeDriver
   by driver`) so a caller that launched its own app gets single-call teardown (driver
   first, then the process) instead of managing both lifecycles by hand.

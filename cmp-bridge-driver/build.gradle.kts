@@ -65,16 +65,11 @@ tasks.test {
     dependsOn(installPlaywrightChromium)
 }
 
-// Maven Central publishing — see RELEASING.md. Duplicated verbatim across every published module
-// (matching this repo's own house style for small, must-stay-in-sync blocks — see the
-// BridgeExplorerOptions duplication between cmp-bridge-http-server/cmp-bridge-mcp-server): Gradle
-// has no classloader-safe way to share a plugins{}-DSL-resolved plugin's own typed extension
-// config across build scripts without buildSrc, and buildSrc hits its own version of that problem
-// specifically for a Kotlin Multiplatform module. mavenPublishing {} is the plugin's own generated
-// Kotlin DSL accessor — no import needed, since it only resolves in a script that applies the
-// plugin itself via the plugins {} block above. group/version come from the root project's
-// allprojects {} (GROUP/VERSION_NAME in gradle.properties); coordinates() isn't called since the
-// plugin already defaults to project.group/project.name/project.version.
+// Maven Central publishing — see RELEASING.md. Duplicated verbatim across every published module:
+// Gradle has no classloader-safe way to share a plugins{}-DSL-resolved plugin's typed extension
+// config across build scripts without buildSrc, which hits its own version of that problem for a
+// KMP module. group/version come from the root project's allprojects {} (gradle.properties);
+// coordinates() isn't called since the plugin already defaults to project.group/name/version.
 mavenPublishing {
     // Targets the Central Publisher Portal (the only host that exists now — Sonatype's legacy
     // OSSRH was fully shut down). Left at its default of leaving each deployment "pending" in the

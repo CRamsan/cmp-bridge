@@ -94,9 +94,9 @@ class WebBridgeDriver private constructor(
     override fun setText(tag: String, text: String) {
         click(tag)
         // Select all existing content first so writing replaces it rather than inserting at the
-        // cursor on top of it (issue #7). Typing a non-empty string over a selection replaces it
-        // as a matter of course, but typing an empty string sends zero keystrokes — a common way
-        // to clear a field would otherwise be a no-op — so clearing needs an explicit Delete.
+        // cursor on top of it. Typing a non-empty string over a selection replaces it as a
+        // matter of course, but an empty string sends zero keystrokes, so clearing needs an
+        // explicit Delete or it'd be a no-op.
         playwrightCall {
             page.keyboard().press("Control+A")
             if (text.isEmpty()) {
@@ -178,19 +178,11 @@ class WebBridgeDriver private constructor(
         }
 
         /**
-         * Installs Chromium alone (via Playwright's own CLI, in a separate JVM) if it isn't
-         * already cached. Left to its own default, Playwright installs its entire browser family
-         * (Chromium, Firefox, WebKit — hundreds of MiB) on first use even though this driver only
-         * ever launches Chromium; scoping the install to just it here avoids that, and pairs with
-         * `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` in [connect] so [Playwright.create] doesn't redo it.
-         *
-         * The install itself runs on a single background thread shared by every caller in this
-         * process — concurrent [connect] calls (even for different targets, where
-         * [BridgeSessionRegistry]'s own per-target locking doesn't help) share the one install
-         * instead of racing into separate downloads. A caller never blocks on the download itself:
-         * while it's running, every caller fails fast with a clear "try again" message instead of
-         * hanging for however long the download takes — connecting a web target the first time on
-         * a machine is expected to fail once or twice before it succeeds.
+         * Installs Chromium alone via Playwright's CLI if not already cached, avoiding a full
+         * browser-family download (pairs with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` in [connect]).
+         * Shares one background install across every concurrent [connect] call rather than
+         * racing separate downloads; a caller never blocks on it, failing fast instead — a web
+         * target's first connect on a fresh machine is expected to need a retry or two.
          */
         private fun ensureChromiumInstalled() {
             if (resolveCachedChromiumExecutable() != null) return

@@ -52,17 +52,16 @@ class DemoScenarioTest {
                 d.waitForText("greeting_text", TextComparator.Equals("Hello, Ada!")).text,
             )
 
-            // setText must replace a field's existing content, not paste at the cursor on top of
-            // it (issue #7) — this would settle on "Hello, AdaGrace!" if it regressed. Longer
-            // pre-existing text (matching the issue's own repro shape, "Gonzalez") lands a center
-            // click mid-text rather than past its end. setTextUntilText retries like
-            // clickUntilText does — synthetic AWT input delivery here is occasionally flaky
-            // independent of this fix (see clickUntilText's own doc).
+            // setText must replace a field's existing content, not insert at the cursor on top
+            // of it — this would settle on "Hello, AdaGrace!" if it regressed. Longer pre-existing
+            // text lands a center click mid-text rather than past its end. setTextUntilText
+            // retries like clickUntilText does, since synthetic AWT input delivery here is
+            // occasionally flaky independent of this.
             d.setTextUntilText("name_field", "Grace", "greeting_text", "Hello, Grace!")
             d.setTextUntilText("name_field", "Gonzalez", "greeting_text", "Hello, Gonzalez!")
 
-            // Exact repro from issue #7: clearing via setText(tag, "") must reset to empty, not
-            // be a no-op (pasting an empty clipboard inserts nothing at a bare cursor position).
+            // Clearing via setText(tag, "") must reset to empty, not be a no-op — pasting an
+            // empty clipboard inserts nothing at a bare cursor position.
             d.setTextUntilText("name_field", "", "greeting_text", "Hello, stranger!")
 
             // Scroll units aren't equivalent across platforms (BridgeDriver.scroll's own doc) —
@@ -133,10 +132,9 @@ class DemoScenarioTest {
     }
 
     /**
-     * Reference recipe for issue #14: `WasmDevServerProcess.launch` has no built-in notion of
-     * Gradle or a repo root — it just runs whatever command it's handed. `e2e.repoRoot` is this
-     * module's own convention (wired in `build.gradle.kts`) for getting the repo root into the
-     * test JVM, not something the library reads itself.
+     * `WasmDevServerProcess.launch` has no built-in notion of Gradle or a repo root — it just
+     * runs whatever command it's handed. `e2e.repoRoot` is this module's own convention (wired in
+     * `build.gradle.kts`) for getting the repo root into the test JVM.
      */
     private suspend fun launchWasmDevServer(): WasmDevServerProcess {
         val repoRoot = System.getProperty("e2e.repoRoot")

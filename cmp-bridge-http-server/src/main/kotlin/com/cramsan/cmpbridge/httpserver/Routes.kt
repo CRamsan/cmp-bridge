@@ -191,6 +191,7 @@ private suspend fun handleBridgeRequest(call: ApplicationCall, registry: BridgeS
  * into a request that's still in flight (slow/stuck), not just ones that already finished.
  * Failures are logged then rethrown so [StatusPages] still turns them into the HTTP response.
  */
+// Logs and rethrows whatever block() throws, regardless of type, so every failure is visible above.
 @Suppress("TooGenericExceptionCaught")
 private inline fun logOperation(request: BridgeRequest, block: () -> Unit) {
     System.err.println(

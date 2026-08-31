@@ -50,14 +50,10 @@ object DesktopBridgeServer {
     const val ENABLED_PROPERTY = "cmpBridge.enabled"
     const val PORT_PROPERTY = "cmpBridge.port"
 
-    // JVM system properties (-D) aren't inherited by a forked child process on any launcher —
-    // Gradle's JavaExec, an IDE run configuration, a shell script — unless that launcher explicitly
-    // forwards them, which none do by default. Environment variables are, by default, everywhere
-    // (Gradle's JavaExec.environment defaults to the launching process's own env; so does a plain
-    // shell fork). The env var is the mechanism that works out of the box through `./gradlew :run`
-    // for any consuming app, without that app needing any Gradle changes of its own; the system
-    // property stays supported for callers that construct the process directly (e.g.
-    // DesktopAppProcess) or invoke `java` themselves.
+    // System properties (-D) aren't inherited by a forked child process unless the launcher
+    // explicitly forwards them; environment variables are, by default (Gradle's JavaExec, a
+    // plain shell fork). The env var works out of the box through `./gradlew :run`; the system
+    // property remains for callers that construct the process or invoke `java` directly.
     const val ENABLED_ENV_VAR = "CMP_BRIDGE_ENABLED"
     const val PORT_ENV_VAR = "CMP_BRIDGE_PORT"
 
@@ -196,8 +192,7 @@ object DesktopBridgeServer {
      * write operations already marshal onto via [SwingUtilities.invokeAndWait]. Reading it
      * directly from this connection's own IO-dispatched coroutine can race a concurrent
      * structural change (`LazyColumn` recycling during [scroll], recomposition during
-     * [pasteText]) and crash mid-read on a torn tree — reproduced as a
-     * `LayoutNode.getZIndex()` NPE during stress testing (issue #23).
+     * [pasteText]) and crash mid-read on a torn tree.
      */
     private fun <T> onEdt(block: () -> T): T {
         var result: Result<T>? = null
@@ -422,13 +417,10 @@ object DesktopBridgeServer {
 
     /**
      * The [SkiaLayer] embedded somewhere in [window]'s component tree — Compose Desktop renders
-     * through it directly (Skia manages its own GPU/software surface), bypassing the standard
-     * AWT/Swing paint chain entirely. That's why neither `Component.paint()` into an off-screen
-     * `BufferedImage` nor `Robot.createScreenCapture` reliably captures real content: the former
-     * only ever sees whatever a plain Swing repaint would draw (Skia's content never reaches that
-     * `Graphics2D`), and the latter reads real screen pixels, which requires an actual mapped,
-     * unoccluded window and X11 permission to capture it — fragile exactly in the kind of
-     * sandboxed/CI environment this bridge needs to work in.
+     * through it directly, bypassing the standard AWT/Swing paint chain entirely. Neither
+     * `Component.paint()` into an off-screen `BufferedImage` (never sees Skia's own surface) nor
+     * `Robot.createScreenCapture` (needs a real, unoccluded, mapped window — fragile in CI) can
+     * reliably capture real content because of this.
      */
     private fun skiaLayer(window: Window): SkiaLayer {
         fun find(component: Component): SkiaLayer? = when {
@@ -478,13 +470,9 @@ object DesktopBridgeServer {
     private fun pasteText(text: String, window: Window) {
         val target = inputTargetComponent(window)
         sendKeyChord(target, KeyEvent.VK_CONTROL, KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK)
-        // Gives Compose's own state/recomposition pipeline a moment to actually apply the
-        // select-all before the paste arrives — invokeAndWait only guarantees the KEY_RELEASED
-        // was *dispatched*, not that Compose's resulting selection state change has been applied
-        // yet (same class of race as onEdt's own doc). Without this, setText's own select-all
-        // intermittently loses the race and the paste appends instead of replacing (issue #23):
-        // measured at a 10-42% failure rate before this, ~0% after, across repeated 100-iteration
-        // stress runs (see BridgeDriverStressTest).
+        // Gives Compose's recomposition pipeline a moment to apply the select-all before the
+        // paste arrives — invokeAndWait only guarantees the KEY_RELEASED was dispatched, not
+        // that the resulting selection change has been applied yet (same race as onEdt's doc).
         Thread.sleep(SELECT_ALL_SETTLE_MS)
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
         sendKeyChord(target, KeyEvent.VK_CONTROL, KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK)

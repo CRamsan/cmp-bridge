@@ -25,24 +25,18 @@ enum class Target { DESKTOP, WEB }
 
 /**
  * Stress-tests each `BridgeDriver` core operation against a single already-launched app instance,
- * per [Target], with no retry wrapper, to measure how often it silently has no effect (issue #23).
- * This is the baseline every candidate fix gets compared against — a real before/after number
- * instead of eyeballing a handful of manual runs. Written once against the `BridgeDriver`
- * interface so a future target only needs a [launch] case, not a parallel test class.
+ * per [Target], with no retry wrapper, measuring how often it silently has no effect. Written
+ * once against the `BridgeDriver` interface so a future target only needs a [launch] case.
  *
- * Where a scenario genuinely can't run on a target — `setText` on web, since `name_field`
- * permanently reports zero bounds there (see ARCHITECTURE.md's "Known platform gaps") — the test
- * is skipped for that target with a reason, not silently omitted or forced to fail.
+ * A scenario that genuinely can't run on a target (`setText` on web — see ARCHITECTURE.md's
+ * "Known platform gaps") is skipped with a reason, not omitted or forced to fail. Each test is a
+ * diagnostic, not a pass/fail regression check: it only asserts a sanity bound (not *completely*
+ * dead) and reports the actual miss count/rate.
  *
- * Each test is a diagnostic, not (yet) a pass/fail regression test for every target: there's no
- * fix in place yet for web's own characteristics, so each one only asserts a sanity bound (the
- * operation isn't *completely* dead) and reports the actual miss count/rate.
- *
- * Every miss burns a full settle-timeout wait, so a genuinely broken operation (or a test-design
- * bug like an unexpected overlay swallowing clicks) can silently balloon to minutes rather than
- * fail fast. The class-level [Timeout] turns that into a clear, bounded failure instead of an
- * open-ended wait — 3 minutes is generous for legitimate web dev-server startup plus a real but
- * partial miss rate, while still catching an actual hang.
+ * The class-level [Timeout] bounds a genuinely broken operation (or a test-design bug swallowing
+ * clicks) to a clear failure instead of an open-ended wait, since every miss burns a full
+ * settle-timeout — 3 minutes covers legitimate web dev-server startup plus a real partial miss
+ * rate while still catching an actual hang.
  */
 @Timeout(value = 3, unit = TimeUnit.MINUTES)
 class BridgeDriverStressTest {
@@ -56,13 +50,11 @@ class BridgeDriverStressTest {
     @EnumSource(Target::class)
     fun `click() drop rate when alternating with a click at a different location`(target: Target) {
         withApp(target) { d ->
-            // increment_button and item_0 sit at different coordinates and both have real bounds
-            // on every target — real usage clicks different elements across a session, and
-            // desktop's click() never sends a MOUSE_EXITED at the old position before the next
-            // click's MOUSE_ENTERED at the new one. item_0 has no click action of its own (a
-            // list row, not a button), so clicking it can't have a side effect that interferes
-            // with the next click — unlike favorite_fruit_field, which opens a dropdown overlay
-            // that then swallows the following click on increment_button entirely.
+            // Alternates clicks between two elements with real bounds on every target, mirroring
+            // real usage (desktop's click() never sends a MOUSE_EXITED at the old position before
+            // the next MOUSE_ENTERED at the new one). item_0 is a list row with no click action of
+            // its own, so it can't have a side effect that interferes with the next click — unlike
+            // favorite_fruit_field, which opens a dropdown overlay that swallows the following click.
             measureClickDropRate(target, d, label = "alternating location") { d.click("item_0") }
         }
     }
@@ -75,8 +67,8 @@ class BridgeDriverStressTest {
             "name_field permanently reports zero bounds on web " +
                 "(ARCHITECTURE.md's Known platform gaps) — not drivable there yet",
         )
-        // #23's own repro was specifically setText/pasteText cycles (click + clipboard paste +
-        // Ctrl+A key chords), not a plain click() — closer to the actual reported failure shape.
+        // setText/pasteText cycles (click + clipboard paste + Ctrl+A key chords) are the
+        // realistic failure shape for this operation, not a plain click().
         withApp(target) { d ->
             var misses = 0
             val missedAtIteration = mutableListOf<Int>()
@@ -188,10 +180,9 @@ class BridgeDriverStressTest {
     }
 
     /**
-     * Reference recipe for issue #14: `WasmDevServerProcess.launch` has no built-in notion of
-     * Gradle or a repo root — it just runs whatever command it's handed. `e2e.repoRoot` is this
-     * module's own convention (wired in `build.gradle.kts`) for getting the repo root into the
-     * test JVM, not something the library reads itself.
+     * `WasmDevServerProcess.launch` has no built-in notion of Gradle or a repo root — it just
+     * runs whatever command it's handed. `e2e.repoRoot` is this module's own convention (wired in
+     * `build.gradle.kts`) for getting the repo root into the test JVM.
      */
     private suspend fun launchWasmDevServer(): WasmDevServerProcess {
         val repoRoot = System.getProperty("e2e.repoRoot")

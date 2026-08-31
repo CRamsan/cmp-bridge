@@ -109,9 +109,8 @@ fun main() = application {
 ```
 
 `startIfEnabled` is a no-op unless the process is launched with `CMP_BRIDGE_ENABLED=true`
-(or `-DcmpBridge.enabled=true`). Currently, the pattern we are using is to leave this capability in a normal build. 
-But in the future we will be looking for a way to make it opt-in at build time, so that the bridge code is not
-included in production builds. 
+(or `-DcmpBridge.enabled=true`). This capability currently ships in every build, gated only at
+runtime — there's no build-time flag yet to exclude the bridge code from a production build.
 
 **2. Tag the elements you want to drive or read**, the same way you would for any
 accessibility-based test tool:

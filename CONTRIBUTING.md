@@ -99,6 +99,10 @@ Beyond what detekt enforces, match the conventions already visible in the codeba
   a socket is opened per-command, why a workaround exists) rather than restating the
   signature. If you catch yourself writing a comment that just repeats the function
   name in prose, delete it.
+- **State the current decision, not the path to it.** A comment can note that something
+  was chosen deliberately and briefly why, but it's not the place for measured
+  before/after numbers, a narrated investigation, or "previously we did X" history —
+  that belongs in the PR description or the tracking issue, not the code.
 - **`@Suppress` needs a reason on the line above it**, the same way
   `TooGenericExceptionCaught` and `TooManyFunctions` are justified at their call sites
   in this codebase — a bare `@Suppress` with no comment reads as suppressing a real
