@@ -28,6 +28,14 @@ private val TAGGED_NODE_NO_TEXT =
         ),
     )
 
+private val TAGGED_NODE_ZERO_BOUNDS =
+    EMPTY_ROOT.copy(
+        children =
+        listOf(
+            EMPTY_ROOT.copy(testTag = "my_tag", text = null, width = 0f, height = 0f),
+        ),
+    )
+
 private val TAGGED_NODE_EXPECTED_TEXT =
     EMPTY_ROOT.copy(
         children =
@@ -57,6 +65,16 @@ private class NeverAppearsDriver : BridgeDriver {
 /** A fake whose tag appears with settled bounds but whose text never becomes non-null. */
 private class TextNeverSettlesDriver : BridgeDriver {
     override fun getHierarchy(): HierarchyNode = TAGGED_NODE_NO_TEXT
+    override fun click(tag: String) = Unit
+    override fun setText(tag: String, text: String) = Unit
+    override fun scroll(anchorTag: String, deltaY: Int) = Unit
+    override fun screenshot(): ByteArray = byteArrayOf()
+    override fun close() = Unit
+}
+
+/** A fake whose tag is present but has zero bounds, as if not yet scrolled into view. */
+private class ZeroBoundsTagDriver : BridgeDriver {
+    override fun getHierarchy(): HierarchyNode = TAGGED_NODE_ZERO_BOUNDS
     override fun click(tag: String) = Unit
     override fun setText(tag: String, text: String) = Unit
     override fun scroll(anchorTag: String, deltaY: Int) = Unit
@@ -206,5 +224,26 @@ class BridgeDriverDefaultsTest {
         val driver = NeverAppearsDriver()
         val node = driver.waitForTagVisibility("my_tag", TagVisibility.GONE, timeoutMs = 200)
         assertEquals(null, node)
+    }
+
+    @Test
+    fun `requireInteractableNode throws UnknownTagException when the tag is absent`() {
+        val driver = NeverAppearsDriver()
+        val error = runCatching { driver.requireInteractableNode("my_tag", "click") }.exceptionOrNull()
+        assertTrue(error is UnknownTagException)
+    }
+
+    @Test
+    fun `requireInteractableNode throws TagNotVisibleException when the tag has zero bounds`() {
+        val driver = ZeroBoundsTagDriver()
+        val error = runCatching { driver.requireInteractableNode("my_tag", "click") }.exceptionOrNull()
+        assertTrue(error is TagNotVisibleException)
+    }
+
+    @Test
+    fun `requireInteractableNode returns the node when it's found and visible`() {
+        val driver = TextNeverSettlesDriver()
+        val node = driver.requireInteractableNode("my_tag", "click")
+        assertEquals("my_tag", node.testTag)
     }
 }

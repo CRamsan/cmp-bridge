@@ -15,6 +15,25 @@ interface BridgeDriver : AutoCloseable {
     fun getBounds(tag: String): HierarchyNode? = getHierarchy().find(tag)?.takeIf { it.width > 0f && it.height > 0f }
 
     /**
+     * Resolves [tag] for an immediate interaction (click/setText/scroll), throwing
+     * [UnknownTagException] if it's absent entirely, or [TagNotVisibleException] if it's present
+     * but has zero/off-screen bounds right now (e.g. not yet scrolled into view). [action] names
+     * the interaction being attempted, for the exception message (e.g. `"click"`, `"scroll"`).
+     * Unlike [getBounds] — which the polling wait helpers above use and which intentionally
+     * treats both cases as "not ready yet" — a one-shot interaction needs the distinction so a
+     * caller can react differently (see https://github.com/CRamsan/cmp-bridge/issues/12).
+     */
+    fun requireInteractableNode(tag: String, action: String): HierarchyNode {
+        val node = getHierarchy().find(tag) ?: throw UnknownTagException("Cannot $action unknown tag \"$tag\"")
+        if (node.width <= 0f || node.height <= 0f) {
+            throw TagNotVisibleException(
+                "Cannot $action tag \"$tag\": it exists but has zero/off-screen bounds — scroll it into view first",
+            )
+        }
+        return node
+    }
+
+    /**
      * Blocks until [tag]'s existence matches [visibility], up to [timeoutMs], by repeatedly
      * re-fetching the hierarchy — [TagVisibility.VISIBLE] for "a new tag appeared" (e.g. after a
      * navigation), [TagVisibility.GONE] for "same screen, state changed" cases like a success

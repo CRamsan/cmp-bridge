@@ -39,8 +39,10 @@ class DesktopBridgeDriver private constructor(private val host: String, private 
     private inline fun <reified T : BridgeResponse> sendTyped(command: BridgeCommand): T {
         val response = send(command)
         if (response is BridgeResponse.Failure) {
-            // DesktopBridgeServer.unknownTag() is the single source of this exact prefix.
+            // DesktopBridgeServer.unknownTag()/notVisibleTag() are the single source of these
+            // exact prefixes.
             if (response.message.startsWith(UNKNOWN_TAG_PREFIX)) throw UnknownTagException(response.message)
+            if (response.message.startsWith(NOT_VISIBLE_TAG_PREFIX)) throw TagNotVisibleException(response.message)
             error(response.message)
         }
         return response as? T ?: error("Unexpected response $response for command $command")
@@ -75,6 +77,9 @@ class DesktopBridgeDriver private constructor(private val host: String, private 
 
         /** The exact prefix `DesktopBridgeServer.unknownTag()` always emits for a missing tag. */
         private const val UNKNOWN_TAG_PREFIX = "Unknown tag: "
+
+        /** The exact prefix `DesktopBridgeServer.notVisibleTag()` always emits for a zero-bounds tag. */
+        private const val NOT_VISIBLE_TAG_PREFIX = "Tag not visible: "
 
         /** Attaches to an app instance that's already running with the bridge armed. */
         fun connect(host: String = "127.0.0.1", port: Int = 8901): DesktopBridgeDriver {

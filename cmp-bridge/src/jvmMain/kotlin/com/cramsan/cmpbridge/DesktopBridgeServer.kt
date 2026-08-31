@@ -64,6 +64,11 @@ object DesktopBridgeServer {
     private const val DEFAULT_PORT = 8901
     private val protocolJson = Json { ignoreUnknownKeys = true }
 
+    // The exact prefixes DesktopBridgeDriver.sendTyped pattern-matches on to distinguish these two
+    // failure modes client-side (see issue #12) — this object is the single source of both.
+    private const val UNKNOWN_TAG_PREFIX = "Unknown tag: "
+    private const val NOT_VISIBLE_TAG_PREFIX = "Tag not visible: "
+
     // Each synthetic AWT event in a gesture needs a strictly increasing timestamp.
     private const val RELEASE_OFFSET_MS = 3L
 
@@ -135,24 +140,15 @@ object DesktopBridgeServer {
         }
 
         is BridgeCommand.Click -> {
-            if (click(command.tag, window)) BridgeResponse.Ack else unknownTag(command.tag)
+            click(command.tag, window).toResponse(command.tag)
         }
 
         is BridgeCommand.SetText -> {
-            if (click(command.tag, window)) {
-                pasteText(command.text, window)
-                BridgeResponse.Ack
-            } else {
-                unknownTag(command.tag)
-            }
+            click(command.tag, window).toResponse(command.tag) { pasteText(command.text, window) }
         }
 
         is BridgeCommand.Scroll -> {
-            if (scroll(command.anchorTag, command.deltaY, window)) {
-                BridgeResponse.Ack
-            } else {
-                unknownTag(command.anchorTag)
-            }
+            scroll(command.anchorTag, command.deltaY, window).toResponse(command.anchorTag)
         }
 
         is BridgeCommand.Screenshot -> {
@@ -160,7 +156,39 @@ object DesktopBridgeServer {
         }
     }
 
-    private fun unknownTag(tag: String): BridgeResponse.Failure = BridgeResponse.Failure("Unknown tag: $tag")
+    /** Turns a tag lookup outcome into the [BridgeResponse] for it, running [onFound] first if it resolved. */
+    private fun NodeLookup.toResponse(tag: String, onFound: () -> Unit = {}): BridgeResponse = when (this) {
+        is NodeLookup.Found -> {
+            onFound()
+            BridgeResponse.Ack
+        }
+
+        NodeLookup.NotFound -> unknownTag(tag)
+
+        NodeLookup.NotVisible -> notVisibleTag(tag)
+    }
+
+    private fun unknownTag(tag: String): BridgeResponse.Failure = BridgeResponse.Failure("$UNKNOWN_TAG_PREFIX$tag")
+
+    private fun notVisibleTag(tag: String): BridgeResponse.Failure =
+        BridgeResponse.Failure("$NOT_VISIBLE_TAG_PREFIX$tag")
+
+    /** The outcome of resolving a tag to a node before dispatching input at it. */
+    private sealed class NodeLookup {
+        data class Found(val node: HierarchyNode) : NodeLookup()
+        data object NotFound : NodeLookup()
+        data object NotVisible : NodeLookup()
+    }
+
+    /**
+     * Resolves [tag] to its node, distinguishing "not in the tree at all" from "present but
+     * zero/off-screen bounds" (e.g. a `LazyColumn` item not yet scrolled into view) — see
+     * https://github.com/CRamsan/cmp-bridge/issues/12.
+     */
+    private fun lookupNode(tag: String, window: Window): NodeLookup {
+        val node = onEdt { buildHierarchy(window).find(tag) } ?: return NodeLookup.NotFound
+        return if (node.width <= 0f || node.height <= 0f) NodeLookup.NotVisible else NodeLookup.Found(node)
+    }
 
     /**
      * Runs [block] on the AWT event dispatch thread and returns its result. Compose's live
@@ -291,9 +319,10 @@ object DesktopBridgeServer {
         return findInteractive(window) ?: window
     }
 
-    /** Returns `false` without dispatching anything if [tag] isn't known yet. */
-    private fun click(tag: String, window: Window): Boolean {
-        val node = onEdt { buildHierarchy(window).find(tag) } ?: return false
+    /** Returns without dispatching anything if [tag] isn't found or isn't currently visible. */
+    private fun click(tag: String, window: Window): NodeLookup {
+        val lookup = lookupNode(tag, window)
+        val node = (lookup as? NodeLookup.Found)?.node ?: return lookup
         val target = inputTargetComponent(window)
         val x = (node.x + node.width / 2).toInt()
         val y = (node.y + node.height / 2).toInt()
@@ -350,15 +379,16 @@ object DesktopBridgeServer {
         )
         // Blocks until every event posted above has been dispatched.
         SwingUtilities.invokeAndWait {}
-        return true
+        return lookup
     }
 
     /**
-     * Synthesizes a wheel-scroll gesture centered on [anchorTag]'s bounds. Returns `false` without
-     * dispatching anything if [anchorTag] isn't known yet.
+     * Synthesizes a wheel-scroll gesture centered on [anchorTag]'s bounds. Returns without
+     * dispatching anything if [anchorTag] isn't found or isn't currently visible.
      */
-    private fun scroll(anchorTag: String, deltaY: Int, window: Window): Boolean {
-        val node = onEdt { buildHierarchy(window).find(anchorTag) } ?: return false
+    private fun scroll(anchorTag: String, deltaY: Int, window: Window): NodeLookup {
+        val lookup = lookupNode(anchorTag, window)
+        val node = (lookup as? NodeLookup.Found)?.node ?: return lookup
         val target = inputTargetComponent(window)
         val x = (node.x + node.width / 2).toInt()
         val y = (node.y + node.height / 2).toInt()
@@ -387,7 +417,7 @@ object DesktopBridgeServer {
             ),
         )
         SwingUtilities.invokeAndWait {}
-        return true
+        return lookup
     }
 
     /**

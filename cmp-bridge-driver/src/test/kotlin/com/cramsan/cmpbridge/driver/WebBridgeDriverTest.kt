@@ -10,11 +10,12 @@ import kotlin.test.assertTrue
 
 /**
  * Serves a static page that fakes Compose Web's accessibility DOM shape (a shadow root containing
- * `#cmp_a11y_root` with two children) — just enough for [WebBridgeDriver.connect]'s own readiness
- * check to pass, so tests get a real, usable [WebBridgeDriver] without needing an actual
+ * `#cmp_a11y_root` with three children) — just enough for [WebBridgeDriver.connect]'s own
+ * readiness check to pass, so tests get a real, usable [WebBridgeDriver] without needing an actual
  * Compose-Web app running. `text_field` is `contenteditable` rather than an `<input>` so its typed
  * content is readable back via `el.innerText`, the same property the real accessibility-walk JS
- * already reads — no fixture-specific read path needed.
+ * already reads — no fixture-specific read path needed. `invisible_tag` is zero-sized (no
+ * padding/border) to exercise the "tag exists but has zero bounds" path (issue #12).
  */
 private val FAKE_A11Y_PAGE = """
     <!DOCTYPE html>
@@ -34,6 +35,14 @@ private val FAKE_A11Y_PAGE = """
         textField.style.height = '20px';
         textField.style.border = '1px solid black';
         root.appendChild(textField);
+        const invisibleButton = document.createElement('button');
+        invisibleButton.id = 'invisible_tag';
+        invisibleButton.setAttribute('role', 'button');
+        invisibleButton.style.width = '0px';
+        invisibleButton.style.height = '0px';
+        invisibleButton.style.padding = '0';
+        invisibleButton.style.border = 'none';
+        root.appendChild(invisibleButton);
         shadow.appendChild(root);
     </script></body></html>
 """.trimIndent()
@@ -82,6 +91,26 @@ class WebBridgeDriverTest {
         val error = runCatching { driver!!.scroll("missing_tag", 40) }.exceptionOrNull()
 
         assertTrue(error is UnknownTagException)
+    }
+
+    @Test
+    fun `click on a zero-bounds tag throws TagNotVisibleException`() {
+        pageServer = FakeA11yPageServer()
+        driver = WebBridgeDriver.connect(pageServer!!.url)
+
+        val error = runCatching { driver!!.click("invisible_tag") }.exceptionOrNull()
+
+        assertTrue(error is TagNotVisibleException)
+    }
+
+    @Test
+    fun `scroll on a zero-bounds anchor throws TagNotVisibleException`() {
+        pageServer = FakeA11yPageServer()
+        driver = WebBridgeDriver.connect(pageServer!!.url)
+
+        val error = runCatching { driver!!.scroll("invisible_tag", 40) }.exceptionOrNull()
+
+        assertTrue(error is TagNotVisibleException)
     }
 
     @Test

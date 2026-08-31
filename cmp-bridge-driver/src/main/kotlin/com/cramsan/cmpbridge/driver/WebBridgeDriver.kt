@@ -80,7 +80,7 @@ class WebBridgeDriver private constructor(
     }
 
     override fun click(tag: String) = playwrightCall {
-        val node = getBounds(tag) ?: throw UnknownTagException("Cannot click unknown tag \"$tag\"")
+        val node = requireInteractableNode(tag, "click")
         page.mouse().click(node.x + node.width / 2.0, node.y + node.height / 2.0)
     }
 
@@ -101,7 +101,7 @@ class WebBridgeDriver private constructor(
     }
 
     override fun scroll(anchorTag: String, deltaY: Int) = playwrightCall {
-        val node = getBounds(anchorTag) ?: throw UnknownTagException("Cannot scroll at unknown tag \"$anchorTag\"")
+        val node = requireInteractableNode(anchorTag, "scroll at")
         val x = node.x + node.width / 2.0
         val y = node.y + node.height / 2.0
         page.mouse().move(x, y)

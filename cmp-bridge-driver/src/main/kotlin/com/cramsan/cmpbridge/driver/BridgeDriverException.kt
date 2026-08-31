@@ -6,6 +6,14 @@ sealed class BridgeDriverException(message: String, cause: Throwable? = null) : 
 /** The targeted tag doesn't exist right now (click/setText/scroll/hierarchy lookup). */
 class UnknownTagException(message: String) : BridgeDriverException(message)
 
+/**
+ * The targeted tag exists in the tree but has zero/off-screen bounds right now — e.g. a
+ * `LazyColumn` item not yet scrolled into view (click/setText/scroll). Distinguishable from
+ * [UnknownTagException] so a caller can react differently (scroll into view, then retry) — see
+ * https://github.com/CRamsan/cmp-bridge/issues/12.
+ */
+class TagNotVisibleException(message: String) : BridgeDriverException(message)
+
 /** A wait ([BridgeDriver.waitForTagVisibility]/[BridgeDriver.waitForText]) exceeded its timeout. */
 class BridgeTimeoutException(message: String) : BridgeDriverException(message)
 

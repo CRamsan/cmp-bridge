@@ -4,6 +4,7 @@ import com.cramsan.cmpbridge.HierarchyNode
 import com.cramsan.cmpbridge.driver.BridgeConnectionException
 import com.cramsan.cmpbridge.driver.BridgeDriver
 import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
+import com.cramsan.cmpbridge.driver.TagNotVisibleException
 import com.cramsan.cmpbridge.driver.UnknownTagException
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.post
@@ -224,6 +225,24 @@ class RoutesTest {
 
         assertEquals(HttpStatusCode.NotFound, response.status)
         assertTrue(response.bodyAsText().contains("Unknown tag"))
+    }
+
+    @Test
+    fun `POST bridge with click on a zero-bounds tag returns 409 with the error message`() = testApplication {
+        val driver = FakeBridgeDriver().apply {
+            clickFailure = { throw TagNotVisibleException("Cannot click tag \"my_tag\": zero bounds") }
+        }
+        application { bridgeHttpModule(testRegistry(driver)) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"target":{"platform":"desktop"},"operation":"click","payload":{"tag":"my_tag"}}""")
+            }
+
+        assertEquals(HttpStatusCode.Conflict, response.status)
+        assertTrue(response.bodyAsText().contains("zero bounds"))
     }
 
     @Test

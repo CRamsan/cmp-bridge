@@ -6,6 +6,7 @@ import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
 import com.cramsan.cmpbridge.driver.BridgeTarget
 import com.cramsan.cmpbridge.driver.BridgeTimeoutException
 import com.cramsan.cmpbridge.driver.InvalidTargetException
+import com.cramsan.cmpbridge.driver.TagNotVisibleException
 import com.cramsan.cmpbridge.driver.TagVisibility
 import com.cramsan.cmpbridge.driver.TextComparator
 import com.cramsan.cmpbridge.driver.UnknownTagException
@@ -89,6 +90,7 @@ fun Application.bridgeHttpModule(registry: BridgeSessionRegistry) {
         // subtypes) so each maps to the status code that best fits what actually went wrong,
         // rather than a uniform 400 — see README's "Driving an app over HTTP or MCP" section.
         exception<UnknownTagException> { call, cause -> respondError(call, HttpStatusCode.NotFound, cause) }
+        exception<TagNotVisibleException> { call, cause -> respondError(call, HttpStatusCode.Conflict, cause) }
         exception<BridgeTimeoutException> { call, cause -> respondError(call, HttpStatusCode.GatewayTimeout, cause) }
         exception<BridgeConnectionException> { call, cause ->
             respondError(call, HttpStatusCode.ServiceUnavailable, cause)

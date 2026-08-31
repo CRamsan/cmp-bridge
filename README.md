@@ -279,6 +279,7 @@ that reflects what went wrong:
 | --- | --- |
 | `400` | The request itself is at fault: malformed JSON, an unrecognized `operation`, or an invalid target (unknown `platform`, missing `url` for `web`). |
 | `404` | The targeted tag doesn't exist right now (`click`/`setText`/`scroll`). |
+| `409` | The targeted tag exists but has zero/off-screen bounds right now — e.g. not yet scrolled into view (`click`/`setText`/`scroll`). |
 | `503` | The driver couldn't reach or stay connected to the app (socket refused/reset, browser crashed, Chromium still installing). |
 | `504` | `waitForTagVisibility`/`waitForText` exceeded their timeout. |
 | `500` | An unexpected failure not covered above. |
