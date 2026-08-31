@@ -16,6 +16,14 @@ touching any of the code below.
   SDK itself via `android-actions/setup-android`.
 - Nothing else to install by hand — Gradle, Kotlin, and Compose Multiplatform all come
   through the wrapper (`./gradlew`) and Gradle plugin resolution.
+- Anything that exercises `WebBridgeDriver` — `cmp-bridge-sample`'s `DemoScenarioTest`
+  web half, or either standalone server run with `--platform web` — launches a real
+  headless Chromium via Playwright, which has its own host OS shared-library
+  dependencies (separate from the browser binary itself, which Playwright caches under
+  `~/.cache/ms-playwright`). If that launch fails with a `TimeoutError` and a list of
+  missing libraries (e.g. `libnss3.so`, `libicudata.so`), run
+  `npx playwright install-deps chromium` (or your OS package manager's equivalent) once
+  per host.
 
 ## Building and testing
 

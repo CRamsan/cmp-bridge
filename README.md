@@ -26,7 +26,10 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
   `java.awt.Robot`. Off unless explicitly armed.
 - **Web**: no code needed in your app at all. Compose Multiplatform's web target
   already renders a hidden accessibility DOM for screen readers, and cmp-bridge drives
-  that directly through a real headless browser (Playwright).
+  that directly through a real headless browser (Playwright). Playwright needs its own
+  host OS shared libraries installed on top of the Chromium binary it downloads — see
+  [CONTRIBUTING.md's Prerequisites](CONTRIBUTING.md#prerequisites) if `WebBridgeDriver`
+  fails to launch it.
 
 Both platforms are exposed through the same interface, `BridgeDriver` — a core set of
 operations (`getHierarchy`, `click`, `setText`, `scroll`, `screenshot`) and one shared
