@@ -62,6 +62,21 @@ private class NeverAppearsDriver : BridgeDriver {
     override fun close() = Unit
 }
 
+/**
+ * Like [NeverAppearsDriver], but overrides [defaultTimeoutMs]/[pollIntervalMs] to exercise a call
+ * that omits its own `timeoutMs` — proving an implementation's connect-time override is honored,
+ * not just the interface's own built-in default.
+ */
+private class ConfigurableNeverAppearsDriver(override val defaultTimeoutMs: Long, override val pollIntervalMs: Long) :
+    BridgeDriver {
+    override fun getHierarchy(): HierarchyNode = EMPTY_ROOT
+    override fun click(tag: String) = Unit
+    override fun setText(tag: String, text: String) = Unit
+    override fun scroll(anchorTag: String, deltaY: Int) = Unit
+    override fun screenshot(): ByteArray = byteArrayOf()
+    override fun close() = Unit
+}
+
 /** A fake whose tag appears with settled bounds but whose text never becomes non-null. */
 private class TextNeverSettlesDriver : BridgeDriver {
     override fun getHierarchy(): HierarchyNode = TAGGED_NODE_NO_TEXT
@@ -245,5 +260,28 @@ class BridgeDriverDefaultsTest {
         val driver = TextNeverSettlesDriver()
         val node = driver.requireInteractableNode("my_tag", "click")
         assertEquals("my_tag", node.testTag)
+    }
+
+    @Test
+    fun `defaultTimeoutMs and pollIntervalMs fall back to BridgeDriver's own defaults when not overridden`() {
+        val driver = NeverAppearsDriver()
+        assertEquals(BridgeDriver.DEFAULT_TIMEOUT_MS, driver.defaultTimeoutMs)
+        assertEquals(BridgeDriver.DEFAULT_POLL_INTERVAL_MS, driver.pollIntervalMs)
+    }
+
+    @Test
+    fun `waitForTagVisibility omitting timeoutMs uses the driver's overridden defaultTimeoutMs`() {
+        val driver = ConfigurableNeverAppearsDriver(defaultTimeoutMs = 100, pollIntervalMs = 10)
+        val error = runCatching { driver.waitForTagVisibility("my_tag", TagVisibility.VISIBLE) }.exceptionOrNull()
+        assertTrue(error is BridgeTimeoutException)
+        assertTrue(error.message.orEmpty().contains("within 100ms"))
+    }
+
+    @Test
+    fun `waitForText omitting timeoutMs uses the driver's overridden defaultTimeoutMs`() {
+        val driver = ConfigurableNeverAppearsDriver(defaultTimeoutMs = 100, pollIntervalMs = 10)
+        val error = runCatching { driver.waitForText("my_tag", TextComparator.Present) }.exceptionOrNull()
+        assertTrue(error is BridgeTimeoutException)
+        assertTrue(error.message.orEmpty().contains("within 100ms"))
     }
 }

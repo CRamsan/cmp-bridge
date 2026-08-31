@@ -10,13 +10,19 @@ import java.util.concurrent.TimeUnit
  * session once it's been idle for [maxIdleMs] or alive for [maxSessionMs], whichever comes first
  * — so a caller resolves a target on every request/tool-call instead of a server binding to one
  * app at launch, without paying [WebBridgeDriver.connect]'s real-browser-launch cost on every
- * single call. [connect] and [nowMs] are seams for tests; production code should leave them at
- * their defaults.
+ * single call. `driverDefaultTimeoutMs`/`driverPollIntervalMs` become every connected driver's own
+ * [BridgeDriver.defaultTimeoutMs]/[BridgeDriver.pollIntervalMs] — process-wide, not per-target, so
+ * they can't fragment [BridgeTarget]'s session cache. [connect] and [nowMs] are seams for tests;
+ * production code should leave them at their defaults.
  */
 class BridgeSessionRegistry(
     private val maxIdleMs: Long,
     private val maxSessionMs: Long,
-    private val connect: (BridgeTarget) -> BridgeDriver = ::defaultConnect,
+    driverDefaultTimeoutMs: Long = BridgeDriver.DEFAULT_TIMEOUT_MS,
+    driverPollIntervalMs: Long = BridgeDriver.DEFAULT_POLL_INTERVAL_MS,
+    private val connect: (BridgeTarget) -> BridgeDriver = {
+        defaultConnect(it, driverDefaultTimeoutMs, driverPollIntervalMs)
+    },
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) : AutoCloseable {
 
@@ -71,14 +77,17 @@ class BridgeSessionRegistry(
     companion object {
         private const val SWEEP_INTERVAL_MS = 15_000L
 
-        private fun defaultConnect(target: BridgeTarget): BridgeDriver = when (target.platform) {
-            "desktop" -> DesktopBridgeDriver.connect(target.host, target.port)
+        private fun defaultConnect(target: BridgeTarget, defaultTimeoutMs: Long, pollIntervalMs: Long): BridgeDriver =
+            when (target.platform) {
+                "desktop" -> DesktopBridgeDriver.connect(target.host, target.port, defaultTimeoutMs, pollIntervalMs)
 
-            "web" -> WebBridgeDriver.connect(
-                target.url ?: throw InvalidTargetException("\"url\" is required when platform is \"web\""),
-            )
+                "web" -> WebBridgeDriver.connect(
+                    target.url ?: throw InvalidTargetException("\"url\" is required when platform is \"web\""),
+                    defaultTimeoutMs,
+                    pollIntervalMs,
+                )
 
-            else -> throw InvalidTargetException("Unknown platform \"${target.platform}\"")
-        }
+                else -> throw InvalidTargetException("Unknown platform \"${target.platform}\"")
+            }
     }
 }

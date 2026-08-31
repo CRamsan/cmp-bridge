@@ -8,6 +8,20 @@ import com.cramsan.cmpbridge.find
  * via a platform-specific `connect(...)` and are torn down via [close].
  */
 interface BridgeDriver : AutoCloseable {
+    /**
+     * Default [waitForTagVisibility]/[waitForText] timeout (ms) when a call doesn't pass its own
+     * `timeoutMs`. [BridgeDriver.DEFAULT_TIMEOUT_MS] unless the implementation was connected with
+     * an override — increase this for slow CI environments or network-backed navigation.
+     */
+    val defaultTimeoutMs: Long get() = DEFAULT_TIMEOUT_MS
+
+    /**
+     * Interval (ms) between hierarchy re-fetches in [waitForTagVisibility]/[waitForText].
+     * [BridgeDriver.DEFAULT_POLL_INTERVAL_MS] unless the implementation was connected with an
+     * override.
+     */
+    val pollIntervalMs: Long get() = DEFAULT_POLL_INTERVAL_MS
+
     /** Returns the app's current semantics tree, root first. */
     fun getHierarchy(): HierarchyNode
 
@@ -34,13 +48,19 @@ interface BridgeDriver : AutoCloseable {
     }
 
     /**
-     * Blocks until [tag]'s existence matches [visibility], up to [timeoutMs], by repeatedly
+     * Blocks until [tag]'s existence matches [visibility], up to [timeoutMs] (defaults to
+     * [defaultTimeoutMs], `15_000`ms unless overridden at connect time), by repeatedly
      * re-fetching the hierarchy — [TagVisibility.VISIBLE] for "a new tag appeared" (e.g. after a
      * navigation), [TagVisibility.GONE] for "same screen, state changed" cases like a success
      * banner or dialog closing (the same class of race [waitForText] closes for a text change).
-     * Returns the node when [visibility] is `VISIBLE`, `null` when it's `GONE`.
+     * Returns the node when [visibility] is `VISIBLE`, `null` when it's `GONE`. Polls every
+     * [pollIntervalMs] (`200`ms unless overridden).
      */
-    fun waitForTagVisibility(tag: String, visibility: TagVisibility, timeoutMs: Long = 15_000): HierarchyNode? {
+    fun waitForTagVisibility(
+        tag: String,
+        visibility: TagVisibility,
+        timeoutMs: Long = defaultTimeoutMs,
+    ): HierarchyNode? {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             val node = getBounds(tag)
@@ -48,28 +68,30 @@ interface BridgeDriver : AutoCloseable {
                 TagVisibility.VISIBLE -> if (node != null) return node
                 TagVisibility.GONE -> if (node == null) return null
             }
-            Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
+            Thread.sleep(pollIntervalMs)
         }
         throw BridgeTimeoutException("Tag \"$tag\" never reached visibility $visibility within ${timeoutMs}ms")
     }
 
     /**
-     * Blocks until [tag]'s settled (non-null) text satisfies [comparator], up to [timeoutMs]. A
-     * node can report `null`/stale text on the very first read after it appears or a screen
-     * transition — desktop's semantics tree and web's (debounced 100–1000ms) accessibility-DOM
-     * sync both need a moment to catch up — so callers reading freshly-appeared or
-     * freshly-changed text should go through this rather than a raw [getHierarchy] lookup. Also
-     * covers "same screen, state changed" assertions where no new tag appears — inline
-     * validation errors, toggled badges, a counter's new value — that a click's own async (e.g.
-     * coroutine-dispatched) state update may not have applied yet by the time it returns.
+     * Blocks until [tag]'s settled (non-null) text satisfies [comparator], up to [timeoutMs]
+     * (defaults to [defaultTimeoutMs], `15_000`ms unless overridden at connect time). A node can
+     * report `null`/stale text on the very first read after it appears or a screen transition —
+     * desktop's semantics tree and web's (debounced 100–1000ms) accessibility-DOM sync both need
+     * a moment to catch up — so callers reading freshly-appeared or freshly-changed text should
+     * go through this rather than a raw [getHierarchy] lookup. Also covers "same screen, state
+     * changed" assertions where no new tag appears — inline validation errors, toggled badges, a
+     * counter's new value — that a click's own async (e.g. coroutine-dispatched) state update may
+     * not have applied yet by the time it returns. Polls every [pollIntervalMs] (`200`ms unless
+     * overridden).
      */
-    fun waitForText(tag: String, comparator: TextComparator, timeoutMs: Long = 15_000): HierarchyNode {
+    fun waitForText(tag: String, comparator: TextComparator, timeoutMs: Long = defaultTimeoutMs): HierarchyNode {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             val node = getBounds(tag)
             val text = node?.text
             if (node != null && text != null && comparator.matches(text)) return node
-            Thread.sleep(WAIT_FOR_TAG_POLL_INTERVAL_MS)
+            Thread.sleep(pollIntervalMs)
         }
         throw BridgeTimeoutException("Tag \"$tag\" never satisfied $comparator within ${timeoutMs}ms")
     }
@@ -90,7 +112,11 @@ interface BridgeDriver : AutoCloseable {
     /** Captures a screenshot of the running app's current frame, PNG-encoded. */
     fun screenshot(): ByteArray
 
-    private companion object {
-        const val WAIT_FOR_TAG_POLL_INTERVAL_MS = 200L
+    companion object {
+        /** Default [defaultTimeoutMs] for an implementation that doesn't override it. */
+        const val DEFAULT_TIMEOUT_MS = 15_000L
+
+        /** Default [pollIntervalMs] for an implementation that doesn't override it. */
+        const val DEFAULT_POLL_INTERVAL_MS = 200L
     }
 }

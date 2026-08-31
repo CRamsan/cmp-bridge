@@ -82,6 +82,8 @@ private val SILENT_NODE =
     )
 
 private class FakeBridgeDriver : BridgeDriver {
+    override var defaultTimeoutMs: Long = BridgeDriver.DEFAULT_TIMEOUT_MS
+    override var pollIntervalMs: Long = BridgeDriver.DEFAULT_POLL_INTERVAL_MS
     var lastClickTag: String? = null
     var lastSetText: Pair<String, String>? = null
     var lastScroll: Pair<String, Int>? = null
@@ -364,6 +366,28 @@ class RoutesTest {
         }
 
     @Test
+    fun `POST bridge with waitForTagVisibility omitting timeoutMs uses the driver's own default`() = testApplication {
+        val driver = FakeBridgeDriver().apply {
+            defaultTimeoutMs = 200
+            pollIntervalMs = 10
+        }
+        application { bridgeHttpModule(testRegistry(driver)) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"waitForTagVisibility",""" +
+                        """"payload":{"tag":"missing","visibility":"VISIBLE"}}""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.GatewayTimeout, response.status)
+        assertTrue(response.bodyAsText().contains("within 200ms"))
+    }
+
+    @Test
     fun `POST bridge with waitForText Present returns the node once its text is settled`() = testApplication {
         val driver = FakeBridgeDriver().apply { tree = TAGGED_NODE }
         application { bridgeHttpModule(testRegistry(driver)) }
@@ -401,6 +425,29 @@ class RoutesTest {
             assertEquals(HttpStatusCode.GatewayTimeout, response.status)
             assertTrue(response.bodyAsText().contains("never satisfied"))
         }
+
+    @Test
+    fun `POST bridge with waitForText omitting timeoutMs uses the driver's own default`() = testApplication {
+        val driver = FakeBridgeDriver().apply {
+            tree = SILENT_NODE
+            defaultTimeoutMs = 200
+            pollIntervalMs = 10
+        }
+        application { bridgeHttpModule(testRegistry(driver)) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{"target":{"platform":"desktop"},"operation":"waitForText",""" +
+                        """"payload":{"tag":"silent_tag","comparator":{"type":"present"}}}""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.GatewayTimeout, response.status)
+        assertTrue(response.bodyAsText().contains("within 200ms"))
+    }
 
     @Test
     fun `POST bridge with waitForText Present on a tag that never appears returns 504 after the timeout`() =

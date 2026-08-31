@@ -19,7 +19,12 @@ private val json = Json { ignoreUnknownKeys = true }
  * launches anything, so [close] never touches a process. Pair [connect] with
  * [DesktopAppProcess.launch] (optionally via [ManagedBridgeDriver]) for a disposable instance.
  */
-class DesktopBridgeDriver private constructor(private val host: String, private val port: Int) : BridgeDriver {
+class DesktopBridgeDriver private constructor(
+    private val host: String,
+    private val port: Int,
+    override val defaultTimeoutMs: Long,
+    override val pollIntervalMs: Long,
+) : BridgeDriver {
     private fun send(command: BridgeCommand): BridgeResponse {
         try {
             Socket(host, port).use { socket ->
@@ -72,6 +77,8 @@ class DesktopBridgeDriver private constructor(private val host: String, private 
     override fun close() = Unit
 
     companion object {
+        // Reachability-probe knobs for connect() itself — unrelated to BridgeDriver's own
+        // waitForTagVisibility/waitForText polling (defaultTimeoutMs/pollIntervalMs below).
         private const val CONNECT_TIMEOUT_MS = 10_000L
         private const val POLL_INTERVAL_MS = 250L
 
@@ -81,10 +88,19 @@ class DesktopBridgeDriver private constructor(private val host: String, private 
         /** The exact prefix `DesktopBridgeServer.notVisibleTag()` always emits for a zero-bounds tag. */
         private const val NOT_VISIBLE_TAG_PREFIX = "Tag not visible: "
 
-        /** Attaches to an app instance that's already running with the bridge armed. */
-        fun connect(host: String = "127.0.0.1", port: Int = 8901): DesktopBridgeDriver {
+        /**
+         * Attaches to an app instance that's already running with the bridge armed.
+         * [defaultTimeoutMs]/[pollIntervalMs] become this driver's [BridgeDriver.defaultTimeoutMs]/
+         * [BridgeDriver.pollIntervalMs] — override for a slower app/CI environment.
+         */
+        fun connect(
+            host: String = "127.0.0.1",
+            port: Int = 8901,
+            defaultTimeoutMs: Long = BridgeDriver.DEFAULT_TIMEOUT_MS,
+            pollIntervalMs: Long = BridgeDriver.DEFAULT_POLL_INTERVAL_MS,
+        ): DesktopBridgeDriver {
             waitUntilConnectable(host, port)
-            return DesktopBridgeDriver(host, port)
+            return DesktopBridgeDriver(host, port, defaultTimeoutMs, pollIntervalMs)
         }
 
         private fun waitUntilConnectable(host: String, port: Int) {

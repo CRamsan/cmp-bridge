@@ -1,5 +1,6 @@
 package com.cramsan.cmpbridge.httpserver
 
+import com.cramsan.cmpbridge.driver.BridgeDriver
 import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
@@ -28,7 +29,12 @@ private class BridgeHttpServerCommand : CliktCommand(name = "cmp-bridge-http-ser
         .default(DEFAULT_SERVER_PORT)
 
     override fun run() {
-        val registry = BridgeSessionRegistry(options.maxIdleMs, options.maxSessionMs)
+        val registry = BridgeSessionRegistry(
+            options.maxIdleMs,
+            options.maxSessionMs,
+            options.defaultTimeoutMs,
+            options.pollIntervalMs,
+        )
         val server = embeddedServer(Netty, port = serverPort) { bridgeHttpModule(registry) }
         Runtime.getRuntime().addShutdownHook(Thread { registry.close() })
         server.start(wait = true)
@@ -48,6 +54,14 @@ internal class SessionOptions : OptionGroup(name = "Session limits") {
         "--max-session-ms",
         help = "Close a target's session after this long since it was first opened, regardless of use",
     ).long().default(DEFAULT_MAX_SESSION_MS)
+    val defaultTimeoutMs: Long by option(
+        "--default-timeout-ms",
+        help = "Default waitForTagVisibility/waitForText timeout for a call that doesn't pass its own timeoutMs",
+    ).long().default(BridgeDriver.DEFAULT_TIMEOUT_MS)
+    val pollIntervalMs: Long by option(
+        "--poll-interval-ms",
+        help = "Interval between hierarchy polls in waitForTagVisibility/waitForText",
+    ).long().default(BridgeDriver.DEFAULT_POLL_INTERVAL_MS)
 }
 
 /** Entry point for the UI test bridge HTTP server. */

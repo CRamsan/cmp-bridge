@@ -1,6 +1,8 @@
 package com.cramsan.cmpbridge.driver
 
 import com.cramsan.cmpbridge.HierarchyNode
+import java.io.IOException
+import java.net.ServerSocket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -262,5 +264,38 @@ class BridgeSessionRegistryTest {
         )
         val error = runCatching { registry.resolve(DESKTOP_TARGET) }.exceptionOrNull()
         assertSame(thrown, error)
+    }
+
+    @Test
+    fun `driverDefaultTimeoutMs and driverPollIntervalMs reach a real default-connected desktop driver`() {
+        // A bare accept-and-close loop is enough to satisfy DesktopBridgeDriver.connect's own
+        // reachability probe — no need to speak the bridge protocol for this test.
+        val serverSocket = ServerSocket(0)
+        val acceptThread = Thread({
+            try {
+                while (true) serverSocket.accept().close()
+            } catch (_: IOException) {
+                // serverSocket.close() (below) breaks the accept() loop this way.
+            }
+        }, "fake-desktop-socket-server").apply {
+            isDaemon = true
+            start()
+        }
+        try {
+            val registry = BridgeSessionRegistry(
+                maxIdleMs = TEST_LIMIT_MS,
+                maxSessionMs = TEST_LIMIT_MS,
+                driverDefaultTimeoutMs = 777L,
+                driverPollIntervalMs = 33L,
+            )
+
+            val driver = registry.resolve(BridgeTarget(platform = "desktop", port = serverSocket.localPort))
+
+            assertEquals(777L, driver.defaultTimeoutMs)
+            assertEquals(33L, driver.pollIntervalMs)
+        } finally {
+            serverSocket.close()
+            acceptThread.join(1_000)
+        }
     }
 }

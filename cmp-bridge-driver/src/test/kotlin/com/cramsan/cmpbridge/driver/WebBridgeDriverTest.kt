@@ -145,4 +145,22 @@ class WebBridgeDriverTest {
 
         assertTrue(error is BridgeConnectionException)
     }
+
+    @Test
+    fun `connect defaults to BridgeDriver's own default timeout and poll interval`() {
+        pageServer = FakeA11yPageServer()
+        driver = WebBridgeDriver.connect(pageServer!!.url)
+
+        assertEquals(BridgeDriver.DEFAULT_TIMEOUT_MS, driver!!.defaultTimeoutMs)
+        assertEquals(BridgeDriver.DEFAULT_POLL_INTERVAL_MS, driver!!.pollIntervalMs)
+    }
+
+    @Test
+    fun `connect honors custom defaultTimeoutMs and pollIntervalMs`() {
+        pageServer = FakeA11yPageServer()
+        driver = WebBridgeDriver.connect(pageServer!!.url, defaultTimeoutMs = 777L, pollIntervalMs = 33L)
+
+        assertEquals(777L, driver!!.defaultTimeoutMs)
+        assertEquals(33L, driver!!.pollIntervalMs)
+    }
 }

@@ -282,7 +282,11 @@ private fun waitForTagVisibilitySchema(): ToolSchema = ToolSchema(
             "timeoutMs",
             buildJsonObject {
                 put("type", "integer")
-                put("description", "Max time to wait, in milliseconds (default 15000)")
+                put(
+                    "description",
+                    "Max time to wait, in milliseconds (defaults to this server's configured default, " +
+                        "15000 unless started with --default-timeout-ms)",
+                )
             },
         )
     },
@@ -310,7 +314,11 @@ private fun waitForTextSchema(): ToolSchema = ToolSchema(
             "timeoutMs",
             buildJsonObject {
                 put("type", "integer")
-                put("description", "Max time to wait, in milliseconds (default 15000)")
+                put(
+                    "description",
+                    "Max time to wait, in milliseconds (defaults to this server's configured default, " +
+                        "15000 unless started with --default-timeout-ms)",
+                )
             },
         )
     },

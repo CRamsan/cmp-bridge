@@ -10,6 +10,7 @@ import java.io.PrintWriter
 import java.net.ServerSocket
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -99,5 +100,23 @@ class DesktopBridgeDriverTest {
         val error = runCatching { DesktopBridgeDriver.connect(port = unusedPort) }.exceptionOrNull()
 
         assertTrue(error is BridgeConnectionException)
+    }
+
+    @Test
+    fun `connect defaults to BridgeDriver's own default timeout and poll interval`() {
+        server = FakeBridgeSocketServer { BridgeResponse.Failure("boom") }
+        val driver = DesktopBridgeDriver.connect(port = server!!.port)
+
+        assertEquals(BridgeDriver.DEFAULT_TIMEOUT_MS, driver.defaultTimeoutMs)
+        assertEquals(BridgeDriver.DEFAULT_POLL_INTERVAL_MS, driver.pollIntervalMs)
+    }
+
+    @Test
+    fun `connect honors custom defaultTimeoutMs and pollIntervalMs`() {
+        server = FakeBridgeSocketServer { BridgeResponse.Failure("boom") }
+        val driver = DesktopBridgeDriver.connect(port = server!!.port, defaultTimeoutMs = 777L, pollIntervalMs = 33L)
+
+        assertEquals(777L, driver.defaultTimeoutMs)
+        assertEquals(33L, driver.pollIntervalMs)
     }
 }

@@ -66,6 +66,8 @@ class WebBridgeDriver private constructor(
     private val playwright: Playwright,
     private val browser: Browser,
     private val page: Page,
+    override val defaultTimeoutMs: Long,
+    override val pollIntervalMs: Long,
 ) : BridgeDriver {
     /** Runs [block], rethrowing any [PlaywrightException] (a dead page/browser) as [BridgeConnectionException]. */
     private inline fun <T> playwrightCall(block: () -> T): T = try {
@@ -117,6 +119,8 @@ class WebBridgeDriver private constructor(
     }
 
     companion object {
+        // connect()'s own accessibility-root-ready probe timeout — unrelated to BridgeDriver's
+        // own waitForTagVisibility/waitForText polling (defaultTimeoutMs/pollIntervalMs below).
         private const val BRIDGE_TIMEOUT_MS = 30_000L
         private const val CHROMIUM_INSTALL_TIMEOUT_MS = 600_000L
         private const val OUTPUT_DRAIN_TIMEOUT_MS = 2_000L
@@ -132,8 +136,16 @@ class WebBridgeDriver private constructor(
                 Thread(runnable, "cmp-bridge-playwright-install").apply { isDaemon = true }
             }
 
-        /** Attaches to a wasmJs app that's already running at [url]. */
-        fun connect(url: String): WebBridgeDriver = try {
+        /**
+         * Attaches to a wasmJs app that's already running at [url]. [defaultTimeoutMs]/
+         * [pollIntervalMs] become this driver's [BridgeDriver.defaultTimeoutMs]/
+         * [BridgeDriver.pollIntervalMs] — override for a slower app/CI environment.
+         */
+        fun connect(
+            url: String,
+            defaultTimeoutMs: Long = BridgeDriver.DEFAULT_TIMEOUT_MS,
+            pollIntervalMs: Long = BridgeDriver.DEFAULT_POLL_INTERVAL_MS,
+        ): WebBridgeDriver = try {
             ensureChromiumInstalled()
             // Playwright.create() would otherwise install its whole default browser set
             // (Chromium, Firefox, WebKit) on first use — this driver only ever launches Chromium.
@@ -152,7 +164,7 @@ class WebBridgeDriver private constructor(
                 null,
                 Page.WaitForFunctionOptions().setTimeout(BRIDGE_TIMEOUT_MS.toDouble()),
             )
-            WebBridgeDriver(playwright, browser, page)
+            WebBridgeDriver(playwright, browser, page, defaultTimeoutMs, pollIntervalMs)
         } catch (e: PlaywrightException) {
             throw BridgeConnectionException(e.message ?: "Could not connect to a web app at $url", e)
         }

@@ -60,17 +60,23 @@ private data class SetTextPayload(val tag: String, val text: String)
 @Serializable
 private data class ScrollPayload(val anchorTag: String, val deltaY: Int)
 
-/** [timeoutMs] mirrors [BridgeDriver.waitForTagVisibility]'s own default; [visibility] is required. */
+/**
+ * [timeoutMs] left `null` defers to the resolved driver's own [BridgeDriver.defaultTimeoutMs]
+ * (see [BridgeDriver.waitForTagVisibility]); [visibility] is required.
+ */
 @Serializable
 private data class WaitForTagVisibilityPayload(
     val tag: String,
     val visibility: TagVisibility,
-    val timeoutMs: Long = 15_000,
+    val timeoutMs: Long? = null,
 )
 
-/** [timeoutMs] mirrors [BridgeDriver.waitForText]'s own default; [comparator] is required. */
+/**
+ * [timeoutMs] left `null` defers to the resolved driver's own [BridgeDriver.defaultTimeoutMs]
+ * (see [BridgeDriver.waitForText]); [comparator] is required.
+ */
 @Serializable
-private data class WaitForTextPayload(val tag: String, val comparator: TextComparator, val timeoutMs: Long = 15_000)
+private data class WaitForTextPayload(val tag: String, val comparator: TextComparator, val timeoutMs: Long? = null)
 
 private val payloadJson = Json { ignoreUnknownKeys = true }
 
@@ -148,13 +154,26 @@ private suspend fun handleBridgeRequest(call: ApplicationCall, registry: BridgeS
 
             "waitForTagVisibility" -> {
                 val payload = payloadJson.decodeFromJsonElement<WaitForTagVisibilityPayload>(request.payload)
-                val node = driver.waitForTagVisibility(payload.tag, payload.visibility, payload.timeoutMs)
+                val timeoutMs = payload.timeoutMs
+                val node =
+                    if (timeoutMs != null) {
+                        driver.waitForTagVisibility(payload.tag, payload.visibility, timeoutMs)
+                    } else {
+                        driver.waitForTagVisibility(payload.tag, payload.visibility)
+                    }
                 if (node != null) call.respond(node) else call.respond(HttpStatusCode.OK)
             }
 
             "waitForText" -> {
                 val payload = payloadJson.decodeFromJsonElement<WaitForTextPayload>(request.payload)
-                call.respond(driver.waitForText(payload.tag, payload.comparator, payload.timeoutMs))
+                val timeoutMs = payload.timeoutMs
+                val node =
+                    if (timeoutMs != null) {
+                        driver.waitForText(payload.tag, payload.comparator, timeoutMs)
+                    } else {
+                        driver.waitForText(payload.tag, payload.comparator)
+                    }
+                call.respond(node)
             }
 
             else -> throw IllegalArgumentException("Unknown operation \"${request.operation}\"")

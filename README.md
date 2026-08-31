@@ -147,6 +147,18 @@ no built-in notion of Gradle or a repo root, so it's on the caller to build that
 (`cmp-bridge-sample`'s `DemoScenarioTest` is a complete, working example of both, including
 that part).
 
+**Timeouts**: `waitForTagVisibility`/`waitForText` default to a `timeoutMs` of `15_000`
+(`BridgeDriver.DEFAULT_TIMEOUT_MS`), polling every `200`ms (`BridgeDriver.DEFAULT_POLL_INTERVAL_MS`)
+in between. Both are per-call overridable (`d.waitForText(tag, comparator, timeoutMs = 30_000)`)
+and also settable once for the whole driver instance, via `connect(...)`'s own
+`defaultTimeoutMs`/`pollIntervalMs` parameters — useful for a slow CI environment or an app
+whose navigations are consistently network-backed, so you don't have to repeat `timeoutMs =`
+on every call:
+
+```kotlin
+val driver = DesktopBridgeDriver.connect(process.host, process.port, defaultTimeoutMs = 30_000)
+```
+
 ## Trying it out with the sample app
 
 The fastest way to see the bridge working is `cmp-bridge-sample`, without writing any
@@ -208,6 +220,12 @@ automatically once it's been idle for `--max-idle-ms` (default 5 minutes) or ali
 `disconnect` operation/tool. Neither server launches the app itself — only attaches to
 one that's already running.
 
+Every driver connected this way also picks up the server's configured
+`--default-timeout-ms` (default `15000`, matching `BridgeDriver.DEFAULT_TIMEOUT_MS`) and
+`--poll-interval-ms` (default `200`) for `waitForTagVisibility`/`waitForText` calls that
+don't pass their own `timeoutMs` — process-wide flags, not per-target, since they're set
+once at server launch rather than per request/tool call.
+
 **HTTP (`cmp-bridge-http-server`)**
 
 1. **Have an app running with the bridge armed.** Either `cmp-bridge-sample` —
@@ -222,7 +240,8 @@ one that's already running.
    java -jar cmp-bridge-http-server-all.jar
    ```
    Run with `--help` for the full option list (`--server-port`, default `8090`, plus
-   `--max-idle-ms`/`--max-session-ms`, described above).
+   `--max-idle-ms`/`--max-session-ms`/`--default-timeout-ms`/`--poll-interval-ms`,
+   described above).
 4. **Send it requests.** It exposes every operation behind a single endpoint,
    `POST /bridge`. The request body is an envelope — `{"target": {...}, "operation":
    "...", "payload": {...}}` — where `target` picks the app instance, `operation` picks
@@ -236,8 +255,8 @@ one that's already running.
 | `setText` | `{"tag": "...", "text": "..."}` | Clicks the element, selects any existing content, and replaces it with `text` (`""` clears it). |
 | `scroll` | `{"anchorTag": "...", "deltaY": N}` | Scroll gesture centered on `anchorTag`'s bounds. |
 | `screenshot` | — | The app's current frame as a PNG (binary response). |
-| `waitForTagVisibility` | `{"tag": "...", "visibility": "VISIBLE"|"GONE", "timeoutMs": N}` | Polls until `tag`'s existence matches `visibility`, up to `timeoutMs`; errors on timeout. `VISIBLE` is for a new tag appearing; `GONE` is for "same screen, state changed" cases like a success banner or dialog closing. Returns the node for `VISIBLE`, no body for `GONE`. |
-| `waitForText` | `{"tag": "...", "comparator": {...}, "timeoutMs": N}` | Polls until `tag`'s settled text satisfies `comparator`, up to `timeoutMs`; errors on timeout. For "same screen, state changed" assertions — inline validation errors, toggled badges — that a click's own async state update may not have applied yet, not just a new tag appearing. |
+| `waitForTagVisibility` | `{"tag": "...", "visibility": "VISIBLE"|"GONE", "timeoutMs": N}` | Polls until `tag`'s existence matches `visibility`, up to `timeoutMs` (optional — defaults to the server's configured `--default-timeout-ms`); errors on timeout. `VISIBLE` is for a new tag appearing; `GONE` is for "same screen, state changed" cases like a success banner or dialog closing. Returns the node for `VISIBLE`, no body for `GONE`. |
+| `waitForText` | `{"tag": "...", "comparator": {...}, "timeoutMs": N}` | Polls until `tag`'s settled text satisfies `comparator`, up to `timeoutMs` (optional — defaults to the server's configured `--default-timeout-ms`); errors on timeout. For "same screen, state changed" assertions — inline validation errors, toggled badges — that a click's own async state update may not have applied yet, not just a new tag appearing. |
 | `disconnect` | — | Ends this target's session early, closing its driver. A no-op if it has none. |
 
 `waitForText`'s `comparator` is one of four shapes, matched against the tag's settled (non-null) text:
@@ -301,7 +320,8 @@ that reflects what went wrong:
      }
    }
    ```
-   `--max-idle-ms`/`--max-session-ms` can be appended to `args` the same way.
+   `--max-idle-ms`/`--max-session-ms`/`--default-timeout-ms`/`--poll-interval-ms` can be
+   appended to `args` the same way.
 4. **Call its tools** — every tool takes the target app instance (`platform`, plus
    `host`/`port` or `url`) as arguments alongside its own:
 
@@ -312,8 +332,8 @@ that reflects what went wrong:
    | `set_text` | `platform`, `host`/`port`/`url`, `tag`, `text` |
    | `scroll` | `platform`, `host`/`port`/`url`, `anchorTag`, `deltaY` |
    | `screenshot` | `platform`, `host`/`port`/`url` (returns an image, not text) |
-   | `wait_for_tag_visibility` | `platform`, `host`/`port`/`url`, `tag`, `visibility` (`"VISIBLE"` or `"GONE"`), `timeoutMs` (optional, default 15000) |
-   | `wait_for_text` | `platform`, `host`/`port`/`url`, `tag`, `comparator` (`{"type": "present"\|"empty"\|"equals"\|"startsWith", ...}`), `timeoutMs` (optional, default 15000) |
+   | `wait_for_tag_visibility` | `platform`, `host`/`port`/`url`, `tag`, `visibility` (`"VISIBLE"` or `"GONE"`), `timeoutMs` (optional, defaults to the server's configured `--default-timeout-ms`, `15000` unless overridden) |
+   | `wait_for_text` | `platform`, `host`/`port`/`url`, `tag`, `comparator` (`{"type": "present"\|"empty"\|"equals"\|"startsWith", ...}`), `timeoutMs` (optional, defaults to the server's configured `--default-timeout-ms`, `15000` unless overridden) |
    | `disconnect` | `platform`, `host`/`port`/`url` — ends this target's session early |
 
 ## License

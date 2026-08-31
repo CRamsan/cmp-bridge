@@ -177,6 +177,15 @@ rather than connecting a `BridgeDriver` directly:
   `disconnect(target)` ends one immediately instead of waiting on either limit. Both
   limits are constructor params, exposed by each server as
   `--max-idle-ms`/`--max-session-ms` (defaults: 5 minutes idle, 30 minutes total).
+- `driverDefaultTimeoutMs`/`driverPollIntervalMs` are two more constructor params
+  (defaults: `BridgeDriver.DEFAULT_TIMEOUT_MS`/`DEFAULT_POLL_INTERVAL_MS`, `15000`/`200`),
+  exposed as `--default-timeout-ms`/`--poll-interval-ms`. They become every connected
+  driver's own `defaultTimeoutMs`/`pollIntervalMs`, so a call that omits `timeoutMs`
+  honors the server's configured value instead of always falling back to a hardcoded
+  `15000`. Deliberately scoped to the registry, not `BridgeTarget` — `BridgeTarget` is a
+  `data class` used as the session cache's key, so adding fields there would fragment the
+  cache (two requests for the same app, differing only in timeout config, would open two
+  redundant sessions).
 - `connect`/`nowMs` are constructor-injectable seams for tests
   (`BridgeSessionRegistryTest`); production code uses the default `when (platform) {
   "desktop" -> ...; "web" -> ... }` dispatch and the real clock.
