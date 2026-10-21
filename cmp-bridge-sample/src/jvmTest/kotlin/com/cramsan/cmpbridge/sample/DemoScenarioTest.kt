@@ -1,5 +1,7 @@
 package com.cramsan.cmpbridge.sample
 
+import com.cramsan.cmpbridge.driver.AndroidAppProcess
+import com.cramsan.cmpbridge.driver.AndroidBridgeDriver
 import com.cramsan.cmpbridge.driver.BridgeDriver
 import com.cramsan.cmpbridge.driver.BridgeTimeoutException
 import com.cramsan.cmpbridge.driver.DesktopAppProcess
@@ -11,6 +13,7 @@ import com.cramsan.cmpbridge.driver.WasmDevServerProcess
 import com.cramsan.cmpbridge.driver.WebBridgeDriver
 import com.cramsan.cmpbridge.find
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -19,11 +22,14 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Drives the [App] sample screen through [BridgeDriver] on both platforms — desktop over the
- * socket bridge, web over Compose Multiplatform's accessibility DOM.
+ * Drives the [App] sample screen through [BridgeDriver] on every platform — desktop over the
+ * socket bridge, Android over the same socket bridge through `adb forward`, web over Compose
+ * Multiplatform's accessibility DOM.
  *
- * Desktop exercises all five `BridgeDriver` operations end to end. Web exercises four of five —
- * see the web test's own comment for why.
+ * Desktop and Android exercise all five `BridgeDriver` operations end to end. Web exercises four
+ * of five — see the web test's own comment for why. The Android case needs a connected device or
+ * emulator and is skipped (not failed) without one, so it runs on a developer machine but not in
+ * the device-less CI build.
  */
 class DemoScenarioTest {
     @Test
@@ -77,6 +83,53 @@ class DemoScenarioTest {
             assertTrue(found != null, "Scrolled $attempts times but \"$targetTag\" never appeared")
 
             // Dropdown recipe (issue #11) — see README's "Driving a dropdown/select".
+            assertEquals("Selected: none", d.waitForText("favorite_fruit_text", TextComparator.Present).text)
+            d.clickUntilTagVisible("favorite_fruit_field", "favorite_fruit_field_option_0")
+            d.clickUntilText("favorite_fruit_field_option_1", "favorite_fruit_text", "Selected: Banana")
+
+            assertValidPng(d.screenshot())
+        }
+    }
+
+    @Test
+    fun `android app is fully drivable through the bridge`() = runBlocking {
+        assumeTrue(
+            AndroidAppProcess.anyDeviceAttached(),
+            "No Android device/emulator attached — skipping the Android case",
+        )
+        AndroidAppProcess.install(androidSampleApk())
+        val process = AndroidAppProcess.launch(ANDROID_COMPONENT)
+        val driver = runCatching { AndroidBridgeDriver.connect(process.port) }
+            .getOrElse {
+                process.close()
+                throw it
+            }
+        ManagedBridgeDriver(process, driver).use { d ->
+            assertEquals("Count: 0", d.waitForText("counter_text", TextComparator.Present).text)
+
+            for (expected in 1..3) {
+                d.clickUntilText("increment_button", "counter_text", "Count: $expected")
+            }
+
+            assertEquals("Hello, stranger!", d.waitForText("greeting_text", TextComparator.Present).text)
+            d.setTextUntilText("name_field", "Ada", "greeting_text", "Hello, Ada!")
+            d.setTextUntilText("name_field", "Grace", "greeting_text", "Hello, Grace!")
+            d.setTextUntilText("name_field", "", "greeting_text", "Hello, stranger!")
+
+            // Android's scroll is a mouse-wheel gesture scaled by the platform's scroll factor, so
+            // the same deltaY as desktop moves a different distance — poll like the other cases do.
+            val targetTag = "item_${ITEM_COUNT - 1}"
+            var found = d.getBounds(targetTag)
+            var attempts = 0
+            while (found == null && attempts < MAX_SCROLL_ATTEMPTS) {
+                d.scroll("item_list", SCROLL_DELTA)
+                found = d.getBounds(targetTag)
+                attempts++
+            }
+            assertTrue(found != null, "Scrolled $attempts times but \"$targetTag\" never appeared")
+
+            // The dropdown's options live in a popup window — a separate Compose root that
+            // AndroidBridgeServer tracks via ViewRootForTest.onViewCreatedCallback.
             assertEquals("Selected: none", d.waitForText("favorite_fruit_text", TextComparator.Present).text)
             d.clickUntilTagVisible("favorite_fruit_field", "favorite_fruit_field_option_0")
             d.clickUntilText("favorite_fruit_field_option_1", "favorite_fruit_text", "Selected: Banana")
@@ -149,6 +202,13 @@ class DemoScenarioTest {
         )
     }
 
+    /** The sample APK, built by the `jvmTest` task's dependency on `:cmp-bridge-sample-android:assembleDebug`. */
+    private fun androidSampleApk(): File {
+        val path = System.getProperty("e2e.androidApk")
+            ?: error("e2e.androidApk not set — run via the jvmTest Gradle task in this module")
+        return File(path).also { check(it.isFile) { "Android sample APK not found at $path" } }
+    }
+
     private fun assertValidPng(png: ByteArray) {
         assertTrue(png.size > MIN_PNG_SIZE_BYTES, "Screenshot was suspiciously small: ${png.size} bytes")
         assertEquals(PNG_MAGIC, png.take(PNG_MAGIC.size))
@@ -218,6 +278,7 @@ class DemoScenarioTest {
     }
 
     private companion object {
+        const val ANDROID_COMPONENT = "com.cramsan.cmpbridge.sample/.android.MainActivity"
         const val MAX_SCROLL_ATTEMPTS = 60
         const val SCROLL_DELTA = 5
         const val WEB_SCROLL_DELTA = 300

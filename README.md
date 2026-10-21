@@ -68,7 +68,7 @@ graph TB
 | Module | What it's for |
 |---|---|
 | `cmp-bridge` | Add to your app. Defines the wire protocol and runs the in-process bridge server on desktop and Android. |
-| `cmp-bridge-driver` | Add to your test source set. `BridgeDriver` plus its desktop/web implementations and helpers to launch a disposable app/dev-server instance. |
+| `cmp-bridge-driver` | Add to your test source set. `BridgeDriver` plus its desktop/Android/web implementations and helpers to launch a disposable app/dev-server instance. |
 | `cmp-bridge-http-server` | Standalone process. Exposes a running app's bridge over a local REST API. |
 | `cmp-bridge-mcp-server` | Standalone process. Exposes a running app's bridge over MCP (stdio), for LLM agents. |
 | `cmp-bridge-sample` | A minimal demo app plus an end-to-end test (`DemoScenarioTest`) driving it on both platforms — the best reference for wiring the bridge into your own app. |
@@ -156,7 +156,7 @@ Button(onClick = { ... }, modifier = Modifier.testTag("submit_button")) { ... }
 `"${fieldTag}_option_$index"` — see `cmp-bridge-sample`'s `App.kt`/`DemoScenarioTest`
 (`favorite_fruit_field`) for a complete example.
 
-**3. Drive it from a test**, via `cmp-bridge-driver`:
+**3. Drive it from a test**, via `cmp-bridge-driver`. Desktop:
 
 ```kotlin
 runBlocking {
@@ -174,8 +174,25 @@ runBlocking {
 from a coroutine, e.g. `runBlocking { }` in plain test/CLI code as above, or directly if
 you're already in one.
 
-`WasmDevServerProcess` + `WebBridgeDriver.connect(url)` is the equivalent pair for a
-wasmJs app. `WasmDevServerProcess.launch` takes a plain `command`/`workingDir` — it has
+Android — `AndroidAppProcess.install(apk)` + `AndroidAppProcess.launch(component)` start the
+already-built app on the attached device/emulator with the bridge armed, and
+`AndroidBridgeDriver.connect(port)` reaches it through an `adb forward` it manages itself:
+
+```kotlin
+runBlocking {
+    AndroidAppProcess.install(File("app/build/outputs/apk/debug/app-debug.apk"))
+    val process = AndroidAppProcess.launch("com.example.myapp/.MainActivity")
+    val driver = AndroidBridgeDriver.connect(process.port)
+    ManagedBridgeDriver(process, driver).use { d ->
+        d.click("submit_button")
+        d.waitForText("status_text", TextComparator.Equals("Done"))
+    }
+}
+```
+
+`adb` is found via `CMP_BRIDGE_ADB`, then `ANDROID_HOME`/`ANDROID_SDK_ROOT`, then the default
+SDK location for the OS, then `PATH`. `WasmDevServerProcess` + `WebBridgeDriver.connect(url)`
+is the equivalent pair for a wasmJs app. `WasmDevServerProcess.launch` takes a plain `command`/`workingDir` — it has
 no built-in notion of Gradle or a repo root, so it's on the caller to build that command
 (`cmp-bridge-sample`'s `DemoScenarioTest` is a complete, working example of both, including
 that part).
@@ -226,10 +243,16 @@ adb shell am start -n com.cramsan.cmpbridge.sample/.android.MainActivity --ez cm
 adb forward tcp:8901 tcp:8901
 ```
 
-The bridge now listens on the device's `127.0.0.1:8901`, forwarded to the same port on your
-host, and speaks the desktop wire protocol — so the exact same `curl` as the desktop example
-above (`"target":{"platform":"desktop"}`) drives the Android app. A dedicated `android`
-target/driver that wraps the `adb` steps is the next step; for now, desktop's is the client.
+Then, with the HTTP server running as above:
+
+```bash
+curl -X POST http://127.0.0.1:8090/bridge -H 'Content-Type: application/json' \
+  -d '{"target":{"platform":"android"},"operation":"getHierarchy"}'
+```
+
+The `android` target does its own `adb forward` to the device's `127.0.0.1:8901` (so no manual
+forwarding is needed) and removes it on `disconnect`. Add `"serial":"emulator-5554"` to the
+target when more than one device is attached.
 
 **Web**
 
@@ -258,11 +281,14 @@ Both standalone servers wrap the same `BridgeDriver` core operations, plus the
 long-running server instance resolves its target app instance per request/tool
 call**, so it can drive any number of apps (or the same app across restarts) over its
 lifetime. Every request/call carries a `target` — `{"platform": "desktop"}` (optionally
-with `host`/`port`, defaulting to `127.0.0.1:8901`) or `{"platform": "web", "url":
-"..."}`.
+with `host`/`port`, defaulting to `127.0.0.1:8901`), `{"platform": "android"}` (optionally
+with the device-side `port`, default `8901`, and `serial` to pick one of several attached
+devices — reached through an `adb forward` the driver sets up itself) or `{"platform": "web",
+"url": "..."}`.
 
-Resolving a target connects and caches a driver for it: cheap for desktop, but a web
-target launches a real headless browser via Playwright. That cached session closes
+Resolving a target connects and caches a driver for it: cheap for desktop, an `adb forward`
+plus a readiness round trip for android, but a web target launches a real headless browser
+via Playwright. That cached session closes
 automatically once it's been idle for `--max-idle-ms` (default 5 minutes) or alive for
 `--max-session-ms` (default 30 minutes), whichever comes first, or immediately via the
 `disconnect` operation/tool. Neither server launches the app itself — only attaches to

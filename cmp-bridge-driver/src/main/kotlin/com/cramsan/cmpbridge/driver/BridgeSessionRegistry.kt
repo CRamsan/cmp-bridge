@@ -128,6 +128,8 @@ class BridgeSessionRegistry(
         ): BridgeDriver = when (target.platform) {
             "desktop" -> DesktopBridgeDriver.connect(target.host, target.port, defaultTimeout, pollInterval)
 
+            "android" -> AndroidBridgeDriver.connect(target.port, target.serial, defaultTimeout, pollInterval)
+
             "web" -> WebBridgeDriver.connect(
                 target.url ?: throw InvalidTargetException("\"url\" is required when platform is \"web\""),
                 defaultTimeout,
