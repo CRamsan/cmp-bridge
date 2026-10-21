@@ -4,6 +4,7 @@ import com.cramsan.cmpbridge.HierarchyNode
 import com.cramsan.cmpbridge.driver.BridgeConnectionException
 import com.cramsan.cmpbridge.driver.BridgeDriver
 import com.cramsan.cmpbridge.driver.BridgeSessionRegistry
+import com.cramsan.cmpbridge.driver.BridgeTarget
 import com.cramsan.cmpbridge.driver.TagNotVisibleException
 import com.cramsan.cmpbridge.driver.UnknownTagException
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -561,6 +562,33 @@ class RoutesTest {
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertTrue(response.bodyAsText().contains("Unknown operation"))
+    }
+
+    @Test
+    fun `POST bridge passes an android target's port and serial through to the registry`() = testApplication {
+        var resolved: BridgeTarget? = null
+        val registry = BridgeSessionRegistry(
+            maxIdle = TEST_SESSION_LIMIT,
+            maxSession = TEST_SESSION_LIMIT,
+            connect = {
+                resolved = it
+                FakeBridgeDriver()
+            },
+        )
+        application { bridgeHttpModule(registry) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val response =
+            client.post("/bridge") {
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{"target":{"platform":"android","port":9001,"serial":"emulator-5554"},""" +
+                        """"operation":"getHierarchy"}""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(BridgeTarget(platform = "android", port = 9001, serial = "emulator-5554"), resolved)
     }
 
     @Test
