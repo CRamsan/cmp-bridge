@@ -76,10 +76,14 @@ app's end; the system property covers callers that construct the process directl
   whichever component in the window actually has mouse listeners registered (found by
   walking the AWT component tree, since that internal nesting is version-dependent).
   Never `java.awt.Robot`, which drives the OS input queue rather than the app and
-  doesn't work in headless/CI environments. Multi-character text entry goes through the
-  system clipboard + Ctrl+V, preceded by a Ctrl+A select-all so it replaces the field's
-  existing content rather than inserting at the cursor on top of it; per-character key
-  simulation doesn't reliably handle unicode/locale-specific input.
+  doesn't work in headless/CI environments. Pointer events are posted in AWT's logical
+  (density-independent) coordinates, converted from the semantics tree's physical-pixel
+  bounds via the window's `GraphicsConfiguration` scale — without that, every click on a
+  HiDPI display lands at twice the intended offset. Multi-character text entry goes
+  through the system clipboard + paste, preceded by a select-all so it replaces the
+  field's existing content rather than inserting at the cursor on top of it; both chords
+  use the platform's menu-shortcut modifier (Cmd on macOS, Ctrl elsewhere), and
+  per-character key simulation doesn't reliably handle unicode/locale-specific input.
 - **Screenshots** come from `SkiaLayer.screenshot()` — Compose Desktop renders through
   Skia directly, bypassing the standard AWT/Swing paint chain, so `Component.paint()`
   into an off-screen image only ever captures a blank background. Not

@@ -314,13 +314,27 @@ object DesktopBridgeServer {
         return findInteractive(window) ?: window
     }
 
+    /**
+     * Center of [node] in the AWT coordinate space that [MouseEvent]s take. [HierarchyNode] bounds
+     * come from `boundsInWindow` in physical pixels (the same space as [screenshot]), while AWT
+     * events are in logical, density-independent points — on a 2x HiDPI display, posting the pixel
+     * values as-is lands every click at twice the intended offset and silently misses its target.
+     */
+    private fun pointerPosition(node: HierarchyNode, window: Window): Pair<Int, Int> {
+        val transform = window.graphicsConfiguration?.defaultTransform
+        val scaleX = transform?.scaleX?.takeIf { it > 0.0 } ?: 1.0
+        val scaleY = transform?.scaleY?.takeIf { it > 0.0 } ?: 1.0
+        val x = ((node.x + node.width / 2) / scaleX).toInt()
+        val y = ((node.y + node.height / 2) / scaleY).toInt()
+        return x to y
+    }
+
     /** Returns without dispatching anything if [tag] isn't found or isn't currently visible. */
     private fun click(tag: String, window: Window): NodeLookup {
         val lookup = lookupNode(tag, window)
         val node = (lookup as? NodeLookup.Found)?.node ?: return lookup
         val target = inputTargetComponent(window)
-        val x = (node.x + node.width / 2).toInt()
-        val y = (node.y + node.height / 2).toInt()
+        val (x, y) = pointerPosition(node, window)
         val queue = Toolkit.getDefaultToolkit().systemEventQueue
         val now = System.currentTimeMillis()
         // A press without preceding pointer movement isn't processed cleanly by Compose's
@@ -385,8 +399,7 @@ object DesktopBridgeServer {
         val lookup = lookupNode(anchorTag, window)
         val node = (lookup as? NodeLookup.Found)?.node ?: return lookup
         val target = inputTargetComponent(window)
-        val x = (node.x + node.width / 2).toInt()
-        val y = (node.y + node.height / 2).toInt()
+        val (x, y) = pointerPosition(node, window)
         val queue = Toolkit.getDefaultToolkit().systemEventQueue
         val now = System.currentTimeMillis()
         // Pointer must be over the target before the wheel event, same as click().
@@ -463,18 +476,22 @@ object DesktopBridgeServer {
      * Replaces the target field's entire content with [text] via the system clipboard rather than
      * simulating keystrokes — per-character key simulation doesn't reliably insert arbitrary text
      * (unicode, symbols) across keyboard layouts/locales. Assumes the target field is already
-     * focused by a preceding [click]. Selects all existing content first (Ctrl+A) so the paste
+     * focused by a preceding [click]. Selects all existing content first (Ctrl/Cmd+A) so the paste
      * replaces it rather than inserting at the cursor on top of it — without this, an empty [text]
      * (a common way to clear a field) would be a no-op, since pasting nothing inserts nothing.
      */
     private fun pasteText(text: String, window: Window) {
         val target = inputTargetComponent(window)
-        sendKeyChord(target, KeyEvent.VK_CONTROL, KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK)
+        // Compose binds select-all/paste to the platform's menu-shortcut modifier: Cmd (Meta) on
+        // macOS, Ctrl everywhere else. A hardcoded Ctrl chord is silently ignored on a Mac.
+        val modifierMask = Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx
+        val modifierKey = if (modifierMask == InputEvent.META_DOWN_MASK) KeyEvent.VK_META else KeyEvent.VK_CONTROL
+        sendKeyChord(target, modifierKey, KeyEvent.VK_A, modifierMask)
         // Gives Compose's recomposition pipeline a moment to apply the select-all before the
         // paste arrives — invokeAndWait only guarantees the KEY_RELEASED was dispatched, not
         // that the resulting selection change has been applied yet (same race as onEdt's doc).
         Thread.sleep(SELECT_ALL_SETTLE_MS)
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
-        sendKeyChord(target, KeyEvent.VK_CONTROL, KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK)
+        sendKeyChord(target, modifierKey, KeyEvent.VK_V, modifierMask)
     }
 }
