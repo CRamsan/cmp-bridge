@@ -96,9 +96,11 @@ class WebBridgeDriver private constructor(
         // Select all existing content first so writing replaces it rather than inserting at the
         // cursor on top of it. Typing a non-empty string over a selection replaces it as a
         // matter of course, but an empty string sends zero keystrokes, so clearing needs an
-        // explicit Delete or it'd be a no-op.
+        // explicit Delete or it'd be a no-op. Compose binds select-all to the browser platform's
+        // menu modifier — Cmd on a macOS host, Ctrl elsewhere — so the chord must be portable too,
+        // or it's silently ignored on a Mac and the new text lands on top of the old.
         playwrightCall {
-            page.keyboard().press("Control+A")
+            page.keyboard().press("ControlOrMeta+A")
             if (text.isEmpty()) {
                 page.keyboard().press("Delete")
             } else {
@@ -263,17 +265,49 @@ class WebBridgeDriver private constructor(
         /**
          * Resolves an already-cached Chromium executable directly, bypassing Playwright's own
          * host-OS check (which can reject newer OS releases it doesn't recognize yet). Falls back
-         * to Playwright's normal resolution if nothing is cached.
+         * to Playwright's normal resolution if nothing is cached. Also doubles as the
+         * "is Chromium installed?" probe in [ensureChromiumInstalled], so it must understand every
+         * host OS's cache layout — a Linux-only lookup made every macOS/Windows connect re-trigger
+         * an install and fail fast forever, even with Chromium fully downloaded.
          */
         private fun resolveCachedChromiumExecutable(): Path? {
-            val cacheDir = File(System.getProperty("user.home"), ".cache/ms-playwright")
+            val cacheDir = playwrightBrowsersDir()
             return cacheDir
                 .listFiles { file -> file.isDirectory && file.name.startsWith("chromium-") }
                 ?.sortedByDescending { it.name }
                 ?.asSequence()
-                ?.map { File(it, "chrome-linux64/chrome") }
+                ?.flatMap { revision -> CHROMIUM_EXECUTABLE_CANDIDATES.asSequence().map { File(revision, it) } }
                 ?.firstOrNull { it.exists() }
                 ?.toPath()
         }
+
+        /**
+         * Where Playwright's CLI puts downloaded browsers: `PLAYWRIGHT_BROWSERS_PATH` if set,
+         * otherwise the per-OS default cache directory.
+         */
+        private fun playwrightBrowsersDir(): File {
+            System.getenv("PLAYWRIGHT_BROWSERS_PATH")?.takeIf { it.isNotBlank() && it != "0" }?.let { return File(it) }
+            val home = System.getProperty("user.home")
+            val os = System.getProperty("os.name").lowercase()
+            val windowsLocalAppData = System.getenv("LOCALAPPDATA") ?: File(home, "AppData/Local").path
+            return when {
+                os.contains("mac") -> File(home, "Library/Caches/ms-playwright")
+                os.contains("win") -> File(windowsLocalAppData, "ms-playwright")
+                else -> File(home, ".cache/ms-playwright")
+            }
+        }
+
+        /** Executable locations inside a `chromium-<revision>` directory, across host OS/arch and Playwright eras. */
+        private val CHROMIUM_EXECUTABLE_CANDIDATES =
+            listOf(
+                "chrome-linux64/chrome",
+                "chrome-linux/chrome",
+                "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+                "chrome-mac/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+                "chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium",
+                "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+                "chrome-win64/chrome.exe",
+                "chrome-win/chrome.exe",
+            )
     }
 }
