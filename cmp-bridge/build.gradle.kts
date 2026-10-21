@@ -49,11 +49,33 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:_")
+            // The Compose compiler plugin runs over every target and refuses to compile a source
+            // set without the runtime on its classpath — including wasmJs, which now has (plain,
+            // non-Compose) protocol sources in commonMain.
+            implementation("org.jetbrains.compose.runtime:runtime:_")
         }
 
-        jvmMain.dependencies {
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:_")
-            implementation(compose.desktop.currentOs)
+        // Shared by the desktop and Android in-app servers: the semantics-tree -> HierarchyNode
+        // mapping, the per-connection line-protocol loop, and tag lookup. Both platforms have a
+        // real SemanticsOwner and java.net sockets; wasmJs has neither (it's driven from outside
+        // via the accessibility DOM), so this is deliberately not in commonMain.
+        val jvmCommonMain by creating {
+            dependsOn(commonMain.get())
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:_")
+                implementation("org.jetbrains.compose.ui:ui:_")
+            }
+        }
+
+        jvmMain {
+            dependsOn(jvmCommonMain)
+            dependencies {
+                implementation(compose.desktop.currentOs)
+            }
+        }
+
+        androidMain {
+            dependsOn(jvmCommonMain)
         }
 
         jvmTest.dependencies {
