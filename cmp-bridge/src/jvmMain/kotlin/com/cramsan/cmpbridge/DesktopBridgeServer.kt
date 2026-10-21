@@ -2,19 +2,9 @@ package com.cramsan.cmpbridge
 
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.awt.ComposeWindow
-import androidx.compose.ui.semantics.CollectionInfo
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.semantics.SemanticsConfiguration
-import androidx.compose.ui.semantics.SemanticsNode
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.SemanticsPropertyKey
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
 import org.jetbrains.skiko.SkiaLayer
@@ -27,11 +17,7 @@ import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.PrintWriter
 import java.net.ServerSocket
-import java.net.Socket
 import java.util.Base64
 import javax.swing.SwingUtilities
 
@@ -58,12 +44,6 @@ object DesktopBridgeServer {
     const val PORT_ENV_VAR = "CMP_BRIDGE_PORT"
 
     private const val DEFAULT_PORT = 8901
-    private val protocolJson = Json { ignoreUnknownKeys = true }
-
-    // The exact prefixes DesktopBridgeDriver.sendTyped pattern-matches on to distinguish these two
-    // failure modes client-side (see issue #12) — this object is the single source of both.
-    private const val UNKNOWN_TAG_PREFIX = "Unknown tag: "
-    private const val NOT_VISIBLE_TAG_PREFIX = "Tag not visible: "
 
     // Each synthetic AWT event in a gesture needs a strictly increasing timestamp.
     private const val RELEASE_OFFSET_MS = 3L
@@ -73,18 +53,6 @@ object DesktopBridgeServer {
 
     // See pasteText's own doc for why this settle is needed between Ctrl+A and the paste.
     private const val SELECT_ALL_SETTLE_MS = 50L
-
-    // Subset of SemanticsActions surfaced on HierarchyNode.actions.
-    private val ACTION_KEYS: List<Pair<String, SemanticsPropertyKey<*>>> =
-        listOf(
-            "OnClick" to SemanticsActions.OnClick,
-            "OnLongClick" to SemanticsActions.OnLongClick,
-            "ScrollBy" to SemanticsActions.ScrollBy,
-            "SetText" to SemanticsActions.SetText,
-            "Expand" to SemanticsActions.Expand,
-            "Collapse" to SemanticsActions.Collapse,
-            "RequestFocus" to SemanticsActions.RequestFocus,
-        )
 
     /**
      * Starts the bridge server on [scope] if enabled via [ENABLED_PROPERTY] or [ENABLED_ENV_VAR]
@@ -102,29 +70,10 @@ object DesktopBridgeServer {
             ServerSocket(port).use { serverSocket ->
                 while (true) {
                     val socket = serverSocket.accept()
-                    launch(Dispatchers.IO) { handleConnection(socket, window) }
-                }
-            }
-        }
-    }
-
-    @Suppress("TooGenericExceptionCaught") // see the comment on the catch site below: deliberate, not an oversight
-    private suspend fun handleConnection(socket: Socket, window: Window) {
-        socket.use {
-            val reader = BufferedReader(InputStreamReader(it.getInputStream()))
-            val writer = PrintWriter(it.getOutputStream(), true)
-            while (true) {
-                val line = reader.readLine() ?: break
-                // A command that fails to decode or execute still owes the driver a response line.
-                val response =
-                    try {
-                        handleCommand(protocolJson.decodeFromString<BridgeCommand>(line), window)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        BridgeResponse.Failure(e.message ?: e::class.simpleName ?: "command failed")
+                    launch(Dispatchers.IO) {
+                        serveBridgeConnection(socket) { command -> handleCommand(command, window) }
                     }
-                writer.println(protocolJson.encodeToString(response))
+                }
             }
         }
     }
@@ -140,7 +89,7 @@ object DesktopBridgeServer {
         }
 
         is BridgeCommand.SetText -> {
-            click(command.tag, window).toResponse(command.tag) { pasteText(command.text, window) }
+            click(command.tag, window).toResponse(command.tag) { _ -> pasteText(command.text, window) }
         }
 
         is BridgeCommand.Scroll -> {
@@ -152,39 +101,12 @@ object DesktopBridgeServer {
         }
     }
 
-    /** Turns a tag lookup outcome into the [BridgeResponse] for it, running [onFound] first if it resolved. */
-    private fun NodeLookup.toResponse(tag: String, onFound: () -> Unit = {}): BridgeResponse = when (this) {
-        is NodeLookup.Found -> {
-            onFound()
-            BridgeResponse.Ack
-        }
-
-        NodeLookup.NotFound -> unknownTag(tag)
-
-        NodeLookup.NotVisible -> notVisibleTag(tag)
-    }
-
-    private fun unknownTag(tag: String): BridgeResponse.Failure = BridgeResponse.Failure("$UNKNOWN_TAG_PREFIX$tag")
-
-    private fun notVisibleTag(tag: String): BridgeResponse.Failure =
-        BridgeResponse.Failure("$NOT_VISIBLE_TAG_PREFIX$tag")
-
-    /** The outcome of resolving a tag to a node before dispatching input at it. */
-    private sealed class NodeLookup {
-        data class Found(val node: HierarchyNode) : NodeLookup()
-        data object NotFound : NodeLookup()
-        data object NotVisible : NodeLookup()
-    }
-
     /**
      * Resolves [tag] to its node, distinguishing "not in the tree at all" from "present but
      * zero/off-screen bounds" (e.g. a `LazyColumn` item not yet scrolled into view) — see
      * https://github.com/CRamsan/cmp-bridge/issues/12.
      */
-    private fun lookupNode(tag: String, window: Window): NodeLookup {
-        val node = onEdt { buildHierarchy(window).find(tag) } ?: return NodeLookup.NotFound
-        return if (node.width <= 0f || node.height <= 0f) NodeLookup.NotVisible else NodeLookup.Found(node)
-    }
+    private fun lookupNode(tag: String, window: Window): NodeLookup = onEdt { buildHierarchy(window) }.lookup(tag)
 
     /**
      * Runs [block] on the AWT event dispatch thread and returns its result. Compose's live
@@ -206,95 +128,8 @@ object DesktopBridgeServer {
         val composeWindow =
             window as? ComposeWindow
                 ?: error("Hierarchy retrieval requires a ComposeWindow, got ${window::class.simpleName}")
-        val owners = composeWindow.semanticsOwners
-        return when (owners.size) {
-            0 -> {
-                error("No semantics owner available yet")
-            }
-
-            1 -> {
-                owners.first().rootSemanticsNode.toHierarchyNode()
-            }
-
-            // Multiple roots (e.g. a popup/dialog on top of the main content): wrap them under a
-            // synthetic, tag-less root rather than picking one arbitrarily.
-            else -> {
-                HierarchyNode(
-                    testTag = null,
-                    role = null,
-                    text = null,
-                    contentDescription = null,
-                    x = 0f,
-                    y = 0f,
-                    width = 0f,
-                    height = 0f,
-                    enabled = true,
-                    actions = emptySet(),
-                    children = owners.map { it.rootSemanticsNode.toHierarchyNode() },
-                )
-            }
-        }
+        return composeWindow.semanticsOwners.map { it.rootSemanticsNode.toHierarchyNode() }.asSingleRoot()
     }
-
-    private fun SemanticsNode.toHierarchyNode(): HierarchyNode {
-        val bounds = boundsInWindow
-        val cfg = config
-        // password() fields never surface real text/contentDescription through this bridge.
-        val isPassword = cfg.contains(SemanticsProperties.Password)
-        return HierarchyNode(
-            testTag = cfg.valueOrNull(SemanticsProperties.TestTag),
-            role = cfg.roleString(),
-            text =
-            if (isPassword) {
-                null
-            } else {
-                cfg.valueOrNull(SemanticsProperties.EditableText)?.text
-                    ?: cfg.valueOrNull(SemanticsProperties.Text)?.joinToString("\n") { it.text }
-            },
-            contentDescription =
-            if (isPassword) null else cfg.valueOrNull(SemanticsProperties.ContentDescription)?.joinToString(", "),
-            x = bounds.left,
-            y = bounds.top,
-            width = bounds.width,
-            height = bounds.height,
-            enabled = !cfg.contains(SemanticsProperties.Disabled),
-            actions = ACTION_KEYS.mapNotNullTo(mutableSetOf()) { (name, key) -> name.takeIf { cfg.contains(key) } },
-            children = children.map { it.toHierarchyNode() },
-        )
-    }
-
-    private fun <T> SemanticsConfiguration.valueOrNull(key: SemanticsPropertyKey<T>): T? =
-        if (contains(key)) get(key) else null
-
-    /**
-     * Normalizes to the same role vocabulary as the web accessibility DOM, including its
-     * ambiguity: an element with both an explicit [SemanticsProperties.Role] and
-     * [SemanticsActions.OnClick] normalizes to `"button"`.
-     */
-    private fun SemanticsConfiguration.roleString(): String? {
-        var role = valueOrNull(SemanticsProperties.Role)?.let { explicitRoleString(it) }
-        if (contains(SemanticsActions.OnClick)) role = "button"
-        if (contains(SemanticsProperties.Heading)) role = "heading"
-        if (contains(SemanticsProperties.EditableText)) role = "textbox"
-        if (contains(SemanticsProperties.CollectionInfo)) {
-            role = collectionRoleString(get(SemanticsProperties.CollectionInfo))
-        }
-        return role
-    }
-
-    private fun explicitRoleString(role: Role): String? = when (role) {
-        Role.Button -> "button"
-        Role.Checkbox -> "checkbox"
-        Role.Switch -> "switch"
-        Role.RadioButton -> "radio"
-        Role.Tab -> "tab"
-        Role.Image -> "img"
-        Role.DropdownList -> "menu"
-        else -> null
-    }
-
-    private fun collectionRoleString(info: CollectionInfo): String =
-        if (info.rowCount > 1 && info.columnCount > 1) "grid" else "list"
 
     /**
      * The component that actually receives input inside a Compose Desktop [Window] — found by
