@@ -26,6 +26,7 @@ include(":cmp-bridge-driver")
 include(":cmp-bridge-http-server")
 include(":cmp-bridge-mcp-server")
 include(":cmp-bridge-sample")
+include(":cmp-bridge-sample-android")
 
 refreshVersions {
     rejectVersionIf {
