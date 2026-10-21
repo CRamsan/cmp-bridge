@@ -16,7 +16,9 @@ touching any of the code below.
   `cmp-bridge-sample`'s Android library targets and the `cmp-bridge-sample-android` app
   all compile against it as part of `./gradlew build`; CI installs the SDK itself via
   `android-actions/setup-android`. Running the Android sample needs a device or emulator:
-  `./gradlew :cmp-bridge-sample-android:installDebug`.
+  `./gradlew :cmp-bridge-sample-android:installDebug`. `DemoScenarioTest`'s Android case drives
+  that app on whatever device/emulator `adb devices` lists; with none attached it is skipped
+  (not failed), which is also what happens in the device-less CI build.
 - Nothing else to install by hand — Gradle, Kotlin, and Compose Multiplatform all come
   through the wrapper (`./gradlew`) and Gradle plugin resolution.
 - Anything that exercises `WebBridgeDriver` — `cmp-bridge-sample`'s `DemoScenarioTest`

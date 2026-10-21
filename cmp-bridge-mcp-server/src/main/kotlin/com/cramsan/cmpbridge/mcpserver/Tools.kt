@@ -34,7 +34,7 @@ private val json = Json { ignoreUnknownKeys = true }
 /**
  * Registers one MCP tool per [com.cramsan.cmpbridge.driver.BridgeDriver] core operation, plus
  * `waitForTagVisibility`/`waitForText` and a `disconnect` operation to end a session early, on
- * [server]. Every tool takes the target app instance (`platform`, plus `host`/`port` or `url`) as
+ * [server]. Every tool takes the target app instance (`platform`, plus `host`/`port`, `serial` or `url`) as
  * arguments and resolves a driver for it via [registry] on each call — see [BridgeSessionRegistry]
  * for how that's cached/evicted across calls.
  */
@@ -215,30 +215,41 @@ private fun Server.registerDisconnectTool(registry: BridgeSessionRegistry) {
 }
 
 /**
- * The target app instance every tool call resolves a driver for: `platform` (`"desktop"` or
- * `"web"`) is always required; `host`/`port` apply to desktop (defaulted like
- * [com.cramsan.cmpbridge.driver.DesktopBridgeDriver.connect]'s own), `url` is required for web.
+ * The target app instance every tool call resolves a driver for: `platform` (`"desktop"`,
+ * `"android"` or `"web"`) is always required; `host`/`port` apply to desktop (defaulted like
+ * [com.cramsan.cmpbridge.driver.DesktopBridgeDriver.connect]'s own), `port`/`serial` to android
+ * (the device-side port, reached through `adb forward`), `url` is required for web.
  */
 private fun JsonObjectBuilder.putTargetProperties() {
     put(
         "platform",
         buildJsonObject {
             put("type", "string")
-            put("description", "\"desktop\" or \"web\"")
+            put("description", "\"desktop\", \"android\" or \"web\"")
         },
     )
     put(
         "host",
         buildJsonObject {
             put("type", "string")
-            put("description", "Desktop bridge host (default 127.0.0.1)")
+            put("description", "Desktop bridge host (default 127.0.0.1); ignored for android")
         },
     )
     put(
         "port",
         buildJsonObject {
             put("type", "integer")
-            put("description", "Desktop bridge port (default 8901)")
+            put(
+                "description",
+                "Bridge port (default 8901): the host port for desktop, the device-side port for android",
+            )
+        },
+    )
+    put(
+        "serial",
+        buildJsonObject {
+            put("type", "string")
+            put("description", "adb device serial to target when several are attached (android only)")
         },
     )
     put(
@@ -389,12 +400,13 @@ private fun stringPropertiesSchema(vararg properties: Pair<String, String>): Too
 private fun JsonObject?.stringArg(name: String): String =
     this?.get(name)?.jsonPrimitive?.content ?: error("Missing \"$name\" argument")
 
-/** Parses the target fields (`platform`/`host`/`port`/`url`) every tool's arguments carry. */
+/** Parses the target fields (`platform`/`host`/`port`/`serial`/`url`) every tool's arguments carry. */
 private fun JsonObject?.toBridgeTarget(): BridgeTarget = BridgeTarget(
     platform = stringArg("platform"),
     host = this?.get("host")?.jsonPrimitive?.content ?: "127.0.0.1",
     port = this?.get("port")?.jsonPrimitive?.int ?: 8901,
     url = this?.get("url")?.jsonPrimitive?.content,
+    serial = this?.get("serial")?.jsonPrimitive?.content,
 )
 
 /**
