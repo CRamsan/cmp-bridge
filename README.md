@@ -46,12 +46,14 @@ graph TB
   http["cmp-bridge-http-server<br/>(REST CLI)"]
   mcp["cmp-bridge-mcp-server<br/>(MCP CLI)"]
   sample["cmp-bridge-sample<br/>(demo app + E2E fixture)"]
+  sampleAndroid["cmp-bridge-sample-android<br/>(Android host app)"]
 
   driver -->|api, for HierarchyNode/protocol types| bridge
   http -->|api| driver
   mcp -->|api| driver
   sample -.jvmMain depends on.-> bridge
   sample -.jvmTest depends on.-> driver
+  sampleAndroid -.depends on.-> sample
 ```
 
 ## Modules
@@ -63,6 +65,7 @@ graph TB
 | `cmp-bridge-http-server` | Standalone process. Exposes a running app's bridge over a local REST API. |
 | `cmp-bridge-mcp-server` | Standalone process. Exposes a running app's bridge over MCP (stdio), for LLM agents. |
 | `cmp-bridge-sample` | A minimal demo app plus an end-to-end test (`DemoScenarioTest`) driving it on both platforms — the best reference for wiring the bridge into your own app. |
+| `cmp-bridge-sample-android` | The sample's Android host app (a thin `MainActivity` around the same shared UI). No bridge is wired in yet — Android support is in progress, and this is the in-repo app it's being built against. |
 
 ## Installing
 
