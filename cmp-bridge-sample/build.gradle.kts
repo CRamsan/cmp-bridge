@@ -6,6 +6,7 @@ plugins {
     id("org.jetbrains.kotlin.multiplatform")
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.android.kotlin.multiplatform.library")
     id("dev.detekt")
 }
 
@@ -19,6 +20,19 @@ dependencies {
 }
 
 kotlin {
+    // The shared demo UI as an Android library target; the runnable Android app lives in
+    // :cmp-bridge-sample-android. AGP 9 no longer allows com.android.application and the KMP
+    // plugin in the same module, hence the split (desktop and web stay in-module as before).
+    android {
+        namespace = "com.cramsan.cmpbridge.sample"
+        compileSdk = (findProperty("compileSdkVersion") as String).toInt()
+        minSdk = (findProperty("minSdkVersion") as String).toInt()
+
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(findProperty("jdkVersion") as String))
+        }
+    }
+
     jvm()
 
     wasmJs {

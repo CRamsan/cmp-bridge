@@ -26,6 +26,8 @@ graph TD
     mcp -->|api| driver
     sample -.jvmMain depends on.-> bridge
     sample -.jvmTest depends on.-> driver
+    sampleAndroid["cmp-bridge-sample-android<br/>(Android host app)"]
+    sampleAndroid -.depends on.-> sample
 ```
 
 | Module | Kind | Depends on | Role |
@@ -34,7 +36,8 @@ graph TD
 | `cmp-bridge-driver` | JVM library | `cmp-bridge` | Consumed by an app's own test code. `BridgeDriver` interface plus its desktop and web implementations, helpers to launch/tear down the app or dev server under test, and `BridgeTarget`/`BridgeSessionRegistry` for resolving a driver by target on demand (used by both standalone servers). |
 | `cmp-bridge-http-server` | JVM application | `cmp-bridge-driver` | Standalone process exposing a `BridgeDriver` over a local REST API, for non-JVM tooling. |
 | `cmp-bridge-mcp-server` | JVM application | `cmp-bridge-driver` | Standalone process exposing a `BridgeDriver` over MCP (stdio), for LLM agents. |
-| `cmp-bridge-sample` | KMP application (jvm, wasmJs) | `cmp-bridge`, `cmp-bridge-driver` (test-only) | Minimal demo screen used as the real end-to-end fixture: the same UI is driven on both platforms in `DemoScenarioTest`. |
+| `cmp-bridge-sample` | KMP application (jvm, wasmJs) + Android library target | `cmp-bridge`, `cmp-bridge-driver` (test-only) | Minimal demo screen used as the real end-to-end fixture: the same UI is driven on both platforms in `DemoScenarioTest`. The Android target only packages the shared screen as a library for the host app below. |
+| `cmp-bridge-sample-android` | Android application | `cmp-bridge-sample` | Thin `MainActivity` hosting the shared screen on Android. Split out because AGP 9 forbids `com.android.application` alongside the KMP plugin in one module. No bridge wired in yet — the in-repo app that Android bridge support is being developed against. |
 
 ## The shared protocol: `HierarchyNode`, `BridgeCommand`/`BridgeResponse`
 
