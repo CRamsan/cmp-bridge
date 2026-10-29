@@ -5,6 +5,11 @@ on:
   schedule:
     - cron: '0 7 * * 1'
 
+# The repo's default GITHUB_TOKEN is read-only, so creating the branch and opening the PR need these.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   "Refresh-Versions":
     runs-on: "ubuntu-latest"
