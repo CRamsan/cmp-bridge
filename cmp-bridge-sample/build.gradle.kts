@@ -6,6 +6,7 @@ plugins {
     id("org.jetbrains.kotlin.multiplatform")
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.android.kotlin.multiplatform.library")
     id("dev.detekt")
 }
 
@@ -19,6 +20,19 @@ dependencies {
 }
 
 kotlin {
+    // The shared demo UI as an Android library target; the runnable Android app lives in
+    // :cmp-bridge-sample-android. AGP 9 no longer allows com.android.application and the KMP
+    // plugin in the same module, hence the split (desktop and web stay in-module as before).
+    android {
+        namespace = "com.cramsan.cmpbridge.sample"
+        compileSdk = (findProperty("compileSdkVersion") as String).toInt()
+        minSdk = (findProperty("minSdkVersion") as String).toInt()
+
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(findProperty("jdkVersion") as String))
+        }
+    }
+
     jvm()
 
     wasmJs {
@@ -65,6 +79,15 @@ tasks.named<Test>("jvmTest") {
     // and BridgeDriverStressTest read it themselves to build the command they hand to
     // WasmDevServerProcess.launch, which has no notion of Gradle or a repo root of its own (#14).
     systemProperty("e2e.repoRoot", rootProject.projectDir.absolutePath)
+
+    // The Android case installs the sample APK itself via adb. It's built here, as a task
+    // dependency, rather than by a nested `./gradlew installDebug` from inside the test: a nested
+    // build of this same project contends with the outer one's locks and has been seen to stall
+    // for ~10 minutes before proceeding.
+    val androidApk = project(":cmp-bridge-sample-android").layout.buildDirectory
+        .file("outputs/apk/debug/cmp-bridge-sample-android-debug.apk")
+    dependsOn(":cmp-bridge-sample-android:assembleDebug")
+    systemProperty("e2e.androidApk", androidApk.get().asFile.absolutePath)
 }
 
 // See the equivalent comment in cmp-bridge/build.gradle.kts.

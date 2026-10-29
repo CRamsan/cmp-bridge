@@ -11,9 +11,14 @@ touching any of the code below.
 
 - JDK 21 (matches `jdkVersion` in `gradle.properties`, which drives every module's
   toolchain).
-- No Android SDK is required to build day-to-day: `cmp-bridge`'s Android target only
-  needs `compileSdkVersion`/`minSdkVersion` set in `gradle.properties`; CI installs the
-  SDK itself via `android-actions/setup-android`.
+- An Android SDK with `compileSdkVersion` (see `gradle.properties`) installed, pointed to
+  by `ANDROID_HOME` or a gitignored `local.properties` (`sdk.dir=...`). `cmp-bridge`'s and
+  `cmp-bridge-sample`'s Android library targets and the `cmp-bridge-sample-android` app
+  all compile against it as part of `./gradlew build`; CI installs the SDK itself via
+  `android-actions/setup-android`. Running the Android sample needs a device or emulator:
+  `./gradlew :cmp-bridge-sample-android:installDebug`. `DemoScenarioTest`'s Android case drives
+  that app on whatever device/emulator `adb devices` lists; with none attached it is skipped
+  (not failed), which is also what happens in the device-less CI build.
 - Nothing else to install by hand — Gradle, Kotlin, and Compose Multiplatform all come
   through the wrapper (`./gradlew`) and Gradle plugin resolution.
 - Anything that exercises `WebBridgeDriver` — `cmp-bridge-sample`'s `DemoScenarioTest`

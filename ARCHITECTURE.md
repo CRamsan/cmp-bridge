@@ -26,15 +26,18 @@ graph TD
     mcp -->|api| driver
     sample -.jvmMain depends on.-> bridge
     sample -.jvmTest depends on.-> driver
+    sampleAndroid["cmp-bridge-sample-android<br/>(Android host app)"]
+    sampleAndroid -.depends on.-> sample
 ```
 
 | Module | Kind | Depends on | Role |
 |---|---|---|---|
-| `cmp-bridge` | KMP library (android, jvm, wasmJs); bridge server is jvm-only | — | Ships inside the app under test. Defines the wire protocol and `HierarchyNode`, and on desktop runs the in-process bridge server. |
-| `cmp-bridge-driver` | JVM library | `cmp-bridge` | Consumed by an app's own test code. `BridgeDriver` interface plus its desktop and web implementations, helpers to launch/tear down the app or dev server under test, and `BridgeTarget`/`BridgeSessionRegistry` for resolving a driver by target on demand (used by both standalone servers). |
+| `cmp-bridge` | KMP library (android, jvm, wasmJs); in-app servers on jvm and android | — | Ships inside the app under test. Defines the wire protocol and `HierarchyNode` (commonMain), the semantics-tree mapping and line-protocol loop shared by both servers (`jvmCommonMain`), and runs the in-process bridge server on desktop (`DesktopBridgeServer`) and Android (`AndroidBridgeServer`). |
+| `cmp-bridge-driver` | JVM library | `cmp-bridge` | Consumed by an app's own test code. `BridgeDriver` interface plus its desktop, Android and web implementations, helpers to launch/tear down the app or dev server under test, and `BridgeTarget`/`BridgeSessionRegistry` for resolving a driver by target on demand (used by both standalone servers). |
 | `cmp-bridge-http-server` | JVM application | `cmp-bridge-driver` | Standalone process exposing a `BridgeDriver` over a local REST API, for non-JVM tooling. |
 | `cmp-bridge-mcp-server` | JVM application | `cmp-bridge-driver` | Standalone process exposing a `BridgeDriver` over MCP (stdio), for LLM agents. |
-| `cmp-bridge-sample` | KMP application (jvm, wasmJs) | `cmp-bridge`, `cmp-bridge-driver` (test-only) | Minimal demo screen used as the real end-to-end fixture: the same UI is driven on both platforms in `DemoScenarioTest`. |
+| `cmp-bridge-sample` | KMP application (jvm, wasmJs) + Android library target | `cmp-bridge`, `cmp-bridge-driver` (test-only) | Minimal demo screen used as the real end-to-end fixture: the same UI is driven on both platforms in `DemoScenarioTest`. The Android target only packages the shared screen as a library for the host app below. |
+| `cmp-bridge-sample-android` | Android application | `cmp-bridge-sample`, `cmp-bridge` | Thin `MainActivity` hosting the shared screen on Android and arming `AndroidBridgeServer`. Split out because AGP 9 forbids `com.android.application` alongside the KMP plugin in one module. |
 
 ## The shared protocol: `HierarchyNode`, `BridgeCommand`/`BridgeResponse`
 
@@ -55,7 +58,7 @@ module builds on:
 
 ## Getting into a running app: two different mechanisms per platform
 
-The two platforms expose their live UI completely differently, and cmp-bridge does not
+The platforms expose their live UI differently, and cmp-bridge does not
 try to paper over that at the transport level — it only unifies the *result*
 (`HierarchyNode`) and the *driver API* (`BridgeDriver`).
 
@@ -96,6 +99,40 @@ app's end; the system property covers callers that construct the process directl
 (in `cmp-bridge-driver`) is the client side: `connect(host, port)` waits for the socket
 to become connectable, then opens a fresh `Socket` per command — it owns no persistent
 connection or process (see "Connecting vs. launching" below).
+
+### Android: the same in-app socket server, reached through `adb forward`
+
+`AndroidBridgeServer` (in `cmp-bridge`, androidMain) is the desktop server's sibling and
+shares its semantics-tree mapping, tag lookup and per-connection protocol loop through the
+`jvmCommonMain` source set, so both report the same `HierarchyNode` tree for the same UI.
+`startIfEnabled(activity, scope)` is a no-op unless the activity's launch intent carries the
+`cmpBridge.enabled` boolean extra — an Android process inherits nothing from the `adb`
+shell's environment, so the intent is the explicit opt-in (`adb shell am start ... --ez
+cmpBridge.enabled true`). It binds to loopback only; the host reaches it through an
+`adb forward`, which `AndroidBridgeDriver.connect` sets up (to a free host port, so parallel
+drivers never collide) and `close()` removes again. Over that forward it is the desktop line
+protocol, so `AndroidBridgeDriver` is a thin delegate around `DesktopBridgeDriver` — with one
+twist: adb accepts the host-side connection even when nothing listens on the device yet, so a
+connectable port proves nothing and `connect` instead polls a real `getHierarchy` round trip
+until the server answers with a tree (a freshly launched activity first answers "no semantics
+owner yet", which counts as not-ready too).
+
+- **Reads** come from Compose's `ViewRootForTest` roots — the public testing hook that
+  `compose-ui-test` itself uses to reach `SemanticsOwner`. Roots are tracked through
+  `ViewRootForTest.onViewCreatedCallback` (installed at start, hence "before
+  `setContent`") rather than by walking the activity's view tree alone, because popups
+  and dialogs get their own `Window` outside the decor view and would otherwise be
+  invisible to the bridge. Several live roots are wrapped under a synthetic tag-less
+  root exactly as on desktop.
+- **Writes** are real `MotionEvent`s/`KeyEvent`s dispatched into the owning root's own
+  `View` on the main thread (`dispatchTouchEvent`, `dispatchGenericMotionEvent` for a
+  mouse-wheel `ACTION_SCROLL`, `dispatchKeyEvent` for clipboard-backed Ctrl+A / Ctrl+V
+  text entry) — never `Instrumentation` or `UiAutomation`, which need a test APK or
+  shell privileges and inject at the system level rather than into the app. Semantics
+  bounds are window-relative, so they're translated into the target view's own
+  coordinates first.
+- **Screenshots** come from `PixelCopy` of the activity window — the composited frame,
+  since Compose's hardware-accelerated rendering bypasses `View.draw`.
 
 ### Web (wasmJs): Compose Multiplatform's built-in accessibility DOM
 
@@ -142,15 +179,19 @@ polling wait loops), are suspend.
 `cmp-bridge-driver` separates *attaching to an already-running app* from *launching
 one*:
 
-- `DesktopBridgeDriver.connect` / `WebBridgeDriver.connect` only ever attach — `close()`
-  never touches a process. Both are `suspend fun`s.
-- `DesktopAppProcess.launch(mainClass)` and `WasmDevServerProcess.launch(command,
-  workingDir)` — also `suspend fun`s — own a subprocess (the app itself, or a wasmJs dev
-  server) — both poll until the port is connectable and tear it down on `close()`.
-  `DesktopAppProcess` is opinionated (runs `mainClass` via `java -cp`, with an isolated
-  `user.home`); `WasmDevServerProcess` isn't — it has no notion of Gradle or a repo root,
-  and just runs whatever `command` it's handed, since only the caller knows its own repo
-  layout.
+- `DesktopBridgeDriver.connect` / `AndroidBridgeDriver.connect` / `WebBridgeDriver.connect`
+  only ever attach — `close()` never touches a process (Android's removes its own
+  `adb forward`, nothing more). All are `suspend fun`s.
+- `DesktopAppProcess.launch(mainClass)`, `AndroidAppProcess.launch(component)` and
+  `WasmDevServerProcess.launch(command, workingDir)` — also `suspend fun`s — own the app
+  under test (a subprocess, an activity on a device, or a wasmJs dev server) and tear it
+  down on `close()`. `DesktopAppProcess` is opinionated (runs `mainClass` via `java -cp`,
+  with an isolated `user.home`); `WasmDevServerProcess` isn't — it has no notion of Gradle
+  or a repo root, and just runs whatever `command` it's handed, since only the caller knows
+  its own repo layout. `AndroidAppProcess` sits in between: it doesn't build an APK
+  (`install(apk)` takes an already-built file), and `launch` is `am start -S` with the
+  opt-in extras — deliberately not `-W`, which has been seen to block for many minutes on an
+  emulator; readiness is `AndroidBridgeDriver.connect`'s job anyway.
 - `ManagedBridgeDriver(resource, driver)` composes the two by delegation (`BridgeDriver
   by driver`) so a caller that launched its own app gets single-call teardown (driver
   first, then the process) instead of managing both lifecycles by hand.
@@ -175,8 +216,9 @@ Both servers hold one `BridgeSessionRegistry` (`cmp-bridge-driver/BridgeSessionR
 for their whole lifetime and resolve every request's/tool-call's target through it,
 rather than connecting a `BridgeDriver` directly:
 
-- **`BridgeTarget`** (`platform`, plus `host`/`port` for desktop or `url` for web) is
-  the plain-data key identifying which app instance to attach to.
+- **`BridgeTarget`** (`platform`, plus `host`/`port` for desktop, `port`/`serial` for
+  android, or `url` for web) is the plain-data key identifying which app instance to attach
+  to.
 - **`resolve(target)`** (`suspend fun`, since connecting is now suspend too) connects
   and caches a driver for `target` on first use, and touches its last-used timestamp on
   every subsequent call. `DesktopBridgeDriver.connect` is a cheap reachability poll;
@@ -268,8 +310,9 @@ capability differences to poll/branch around, not as bugs in the caller's own te
 ## Design invariants worth preserving
 
 - **Debug/test only, always opt-in.** `DesktopBridgeServer` never starts unless
-  `CMP_BRIDGE_ENABLED=true` or `-DcmpBridge.enabled=true` is set explicitly; there is no
-  way for it to activate in a normal run of a consuming app.
+  `CMP_BRIDGE_ENABLED=true` or `-DcmpBridge.enabled=true` is set explicitly, and
+  `AndroidBridgeServer` never starts without the `cmpBridge.enabled` intent extra; there
+  is no way for either to activate in a normal run of a consuming app.
 - **Real tree, real input, never a platform input-injection API.** Reads always come
   from the platform's own live semantics/accessibility tree (never cached, never
   reconstructed from a snapshot); writes always go through real input events on the
@@ -280,8 +323,9 @@ capability differences to poll/branch around, not as bugs in the caller's own te
   stay free to diverge in how they read/write (socket protocol vs. Playwright) as long
   as both produce `HierarchyNode` and implement the same core operations. Don't
   smuggle platform-specific concepts up through the interface.
-- **Connect and launch are separate concerns.** `*BridgeDriver.connect` never owns a
-  process; `*Process.launch` never speaks the bridge protocol. `ManagedBridgeDriver` is
+- **Connect and launch are separate concerns.** `*BridgeDriver.connect` never owns an app
+  (an `adb forward` it set up itself is the one resource it does own); `*Process.launch`
+  never speaks the bridge protocol. `ManagedBridgeDriver` is
   the only place the two are composed. New driver/process pairs should keep that split.
 - **Tag-only lookups, deliberately no coordinate/text-based fallback.** Coordinates are
   brittle across locale/layout/theme changes, and text is ambiguous (duplicate labels)
