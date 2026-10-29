@@ -17,8 +17,12 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # ubuntu-latest moved to Ubuntu 26.04 (Oct 2026), whose Android cmdline-tools no longer have the
+      # legacy `tools` package that setup-android installs by default — so only request platform-tools.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
